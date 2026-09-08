@@ -1,0 +1,803 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Square → 青色申告決算書 集計ツール</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&family=Zen+Kaku+Gothic+New:wght@500;700&display=swap');
+
+  :root{
+    --bg:#F6F4F1; --surface:#FFFFFF; --ink:#2B2320; --ink-soft:#6B6058;
+    --line:#E6E0D8; --accent:#B85C7A; --accent-ink:#7C3A50; --accent-soft:#F3E3E8;
+    --ok:#6E8A6A; --ok-soft:#EAF1E7; --warn:#B4632F; --warn-soft:#FBEAE0;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:'Noto Sans JP',-apple-system,sans-serif;background:var(--bg);color:var(--ink);line-height:1.7;padding:24px 14px 60px;}
+  .wrap{max-width:680px;margin:0 auto;}
+  header{margin-bottom:24px;}
+  .eyebrow{font-family:'Zen Kaku Gothic New',sans-serif;font-size:12.5px;font-weight:700;color:var(--accent-ink);margin:0 0 6px;}
+  h1{font-family:'Zen Kaku Gothic New',sans-serif;font-size:23px;font-weight:700;margin:0 0 10px;}
+  .lead{color:var(--ink-soft);font-size:14.5px;margin:0;max-width:48ch;}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:18px;}
+  .card h2{font-size:15px;font-weight:700;margin:0 0 14px;font-family:'Zen Kaku Gothic New',sans-serif;}
+
+  .steps{margin:0;padding:0;list-style:none;}
+  .steps li{display:flex;gap:12px;padding:9px 0;border-bottom:1px solid var(--line);font-size:13.5px;color:var(--ink-soft);}
+  .steps li:last-child{border-bottom:none;}
+  .steps .num{flex:0 0 auto;width:20px;height:20px;border-radius:50%;background:var(--accent-soft);color:var(--accent-ink);font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;}
+
+  .drop{border:1.5px dashed var(--line);border-radius:12px;padding:28px 16px;text-align:center;cursor:pointer;}
+  .drop.drag{border-color:var(--accent);background:var(--accent-soft);}
+  .drop input{display:none;}
+  .drop .icon{font-size:26px;margin-bottom:8px;display:block;}
+  .drop .main-text{font-weight:600;font-size:14.5px;margin-bottom:4px;}
+  .drop .sub-text{font-size:12.5px;color:var(--ink-soft);}
+  .filelist{margin-top:12px;font-size:12.5px;color:var(--ink-soft);}
+  .filelist div{padding:3px 0;}
+
+  select{
+    font-family:'Noto Sans JP',sans-serif;font-size:14px;padding:8px 10px;
+    border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);
+  }
+  .yearRow{display:flex;align-items:center;gap:10px;margin-bottom:16px;font-size:13.5px;color:var(--ink-soft);}
+
+  .hero-stat{
+    background:linear-gradient(135deg,var(--accent-soft),var(--surface));
+    border-radius:12px;padding:20px;margin-bottom:14px;
+  }
+  .hero-stat .bubble{
+    display:inline-flex;align-items:center;justify-content:center;
+    width:22px;height:22px;border-radius:50%;background:var(--accent);color:#fff;
+    font-size:12px;font-weight:700;margin-right:8px;
+  }
+  .hero-stat .label{font-size:13px;color:var(--ink-soft);margin-bottom:6px;}
+  .hero-stat .value{font-size:30px;font-weight:700;font-family:'Zen Kaku Gothic New',sans-serif;}
+  .hero-stat .sub{font-size:12px;color:var(--ink-soft);margin-top:6px;}
+
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;}
+  .stat{background:var(--bg);border-radius:10px;padding:12px 14px;}
+  .stat .label{font-size:11.5px;color:var(--ink-soft);margin-bottom:4px;}
+  .stat .value{font-size:17px;font-weight:700;font-family:'Zen Kaku Gothic New',sans-serif;}
+
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);}
+  th{color:var(--ink-soft);font-weight:600;font-size:11.5px;}
+  td.num{text-align:right;font-variant-numeric:tabular-nums;}
+  tr.total td{font-weight:700;border-top:2px solid var(--ink);border-bottom:none;}
+  .table-scroll{border-radius:8px;border:1px solid var(--line);overflow:hidden;}
+
+  .formRow{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .formRow label{display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:var(--ink-soft);}
+  .formRow input,.formRow select{
+    font-family:'Noto Sans JP',sans-serif;font-size:14px;padding:9px 10px;
+    border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink);
+  }
+  .delBtn{background:none;border:none;color:var(--warn);font-size:12px;cursor:pointer;padding:2px 6px;}
+  .note{font-size:12.5px;color:var(--ink-soft);background:var(--bg);border-radius:8px;padding:12px 14px;margin-top:12px;}
+  .note b{color:var(--ink);}
+
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:13px 18px;background:var(--accent);color:#fff;border:none;border-radius:10px;font-size:14.5px;font-weight:600;font-family:'Noto Sans JP',sans-serif;cursor:pointer;margin-top:10px;}
+  .btn:active{background:var(--accent-ink);}
+  .btn.secondary{background:var(--surface);color:var(--accent-ink);border:1.5px solid var(--accent);}
+  .msg{border-radius:10px;padding:14px 16px;font-size:13.5px;margin-top:16px;}
+  .msg.warn{background:var(--warn-soft);color:var(--warn);}
+  .hidden{display:none;}
+  footer{text-align:center;font-size:11.5px;color:var(--ink-soft);margin-top:20px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <p class="eyebrow">青色申告決算書に転記しやすく</p>
+    <h1>Square売上 年間集計ツール</h1>
+    <p class="lead">Squareの「お取引」CSVを月ごとにアップロードしていくと、決算書1ページ目の①「売上(収入)金額」と、2ページ目の「月別売上金額」の表に、そのまま書き写せる形にまとめます。</p>
+  </header>
+
+  <div class="card">
+    <ul class="steps">
+      <li><span class="num">1</span><span>月ごとにSquareの「お取引」→「取引CSV」をエクスポート(貯めておく)</span></li>
+      <li><span class="num">2</span><span>確定申告の準備をするタイミングで、その年の分のCSVを全部まとめて選択</span></li>
+      <li><span class="num">3</span><span>下に出る金額を、決算書の①・月別売上の表にそのまま書き写す</span></li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <label class="drop" id="dropZone">
+      <input type="file" id="fileInput" accept=".csv" multiple>
+      <span class="icon">📄</span>
+      <span class="main-text">Squareの取引CSVを選択(複数選択OK)</span>
+      <span class="sub-text">1年分をまとめて選ぶと年間集計になります</span>
+    </label>
+    <div class="filelist" id="fileList"></div>
+  </div>
+
+  <div class="card">
+    <h2>売上を手入力する</h2>
+    <p class="lead" style="font-size:13px;margin-bottom:14px;">Square以外の売上(現金のみの取引や他サービスの分など)を追加できます。ここで入力した分もSquareのデータと合算されます。</p>
+    <div class="formRow">
+      <label>日付<input type="date" id="salesDate"></label>
+      <label>金額(円)<input type="number" id="salesAmount" placeholder="0" min="0"></label>
+      <label style="grid-column:1/-1;">摘要(メモ)<input type="text" id="salesMemo" placeholder="例：店販商品を現金販売"></label>
+    </div>
+    <button class="btn" id="addSalesBtn">この売上を追加</button>
+
+    <div class="table-scroll" style="margin-top:16px;max-height:220px;overflow-y:auto;">
+      <table>
+        <thead><tr><th>日付</th><th class="num">金額</th><th>摘要</th><th></th></tr></thead>
+        <tbody id="manualSalesBody"></tbody>
+      </table>
+    </div>
+
+    <div class="grid2" style="margin-top:14px;">
+      <button class="btn secondary" id="loadSalesBtn">売上データを読み込む(JSON)</button>
+      <button class="btn secondary" id="saveSalesBtn">売上データを保存(JSON)</button>
+    </div>
+    <input type="file" id="salesFileInput" accept=".json" style="display:none;">
+  </div>
+
+  <div class="card">
+    <h2>経費を記帳する(仕訳)</h2>
+    <p class="lead" style="font-size:13px;margin-bottom:14px;">決算書の経費科目に合わせて入力すると、科目ごとに自動で集計されます。前回の続きから入力する場合は先に「経費データを読み込む」でJSONファイルを選んでください。</p>
+
+    <div class="formRow">
+      <label>日付<input type="date" id="expDate"></label>
+      <label>科目<select id="expCategory"></select></label>
+      <label>金額(円)<input type="number" id="expAmount" placeholder="0" min="0"></label>
+      <label>摘要(メモ)<input type="text" id="expMemo" placeholder="例：ジェルカラー仕入"></label>
+    </div>
+    <button class="btn" id="addExpenseBtn">この内容を追加</button>
+
+    <div class="table-scroll" style="margin-top:16px;max-height:220px;overflow-y:auto;" id="expenseListWrap">
+      <table>
+        <thead><tr><th>日付</th><th>科目</th><th class="num">金額</th><th>摘要</th><th></th></tr></thead>
+        <tbody id="expenseBody"></tbody>
+      </table>
+    </div>
+
+    <div class="grid2" style="margin-top:14px;">
+      <button class="btn secondary" id="loadExpenseBtn">経費データを読み込む(JSON)</button>
+      <button class="btn secondary" id="saveExpenseBtn">経費データを保存(JSON)</button>
+    </div>
+    <input type="file" id="expenseFileInput" accept=".json" style="display:none;">
+
+    <h2 style="margin-top:20px;">科目別集計 — 決算書1ページ目「経費」欄に転記</h2>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>科目</th><th class="num">金額</th></tr></thead>
+        <tbody id="categoryBody"></tbody>
+      </table>
+    </div>
+    <button class="btn secondary" id="downloadExpenseCsvBtn">科目別集計をCSVでダウンロード</button>
+  </div>
+
+  <div id="pnlSummary" class="card hidden">
+    <h2>損益まとめ</h2>
+    <div class="grid2">
+      <div class="stat"><div class="label">① 売上(収入)金額</div><div class="value" id="pnlSales">-</div></div>
+      <div class="stat"><div class="label">経費 合計</div><div class="value" id="pnlExpenses">-</div></div>
+    </div>
+    <div class="hero-stat" style="margin-top:4px;">
+      <div class="label">差引金額(所得金額の目安・青色申告特別控除前)</div>
+      <div class="value" id="pnlNet">-</div>
+      <div class="sub">実際の所得金額は青色申告特別控除などを差し引いた後の金額です</div>
+    </div>
+  </div>
+
+  <div id="resultArea" class="hidden">
+
+    <div class="card">
+      <div class="yearRow">
+        対象の年度：
+        <select id="yearSelect"></select>
+      </div>
+
+      <div class="hero-stat">
+        <div class="label"><span class="bubble">①</span>売上(収入)金額 — 決算書1ページ目 ①欄・G01に転記</div>
+        <div class="value" id="totalSales">-</div>
+        <div class="sub" id="totalCount">-</div>
+      </div>
+
+      <div class="grid2">
+        <div class="stat"><div class="label">Square決済手数料 合計</div><div class="value" id="totalFee">-</div></div>
+        <div class="stat"><div class="label">対象取引データ</div><div class="value" id="dataRange">-</div></div>
+      </div>
+
+      <div class="note">
+        手数料は決算書の経費項目に「支払手数料」の科目がないため、<b>「雑費」(⑬欄)</b>に含めるか、経費の空欄行に「支払手数料」と自分で科目名を書いて記載するのが一般的です。迷う場合は税務署や税理士に確認してください。
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>月別売上(収入)金額 — 決算書2ページ目の表に転記</h2>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>月</th><th class="num">売上(収入)金額</th><th class="num">対象取引件数</th></tr></thead>
+          <tbody id="monthlyBody"></tbody>
+        </table>
+      </div>
+      <button class="btn secondary" id="downloadMonthlyBtn">月別集計をCSVでダウンロード</button>
+    </div>
+
+    <div class="card">
+      <h2>入金待ち(まだ銀行に振り込まれていない分)</h2>
+      <p class="lead" style="font-size:13px;margin-bottom:12px;">Squareは決済から数日後に銀行へまとめて入金される仕組みです。ここは売上の計上とは関係なく、単に「振り込まれるはずのお金」を確認するための一覧です。</p>
+      <div class="grid2">
+        <div class="stat"><div class="label">入金待ち合計</div><div class="value" id="pendingTotal">-</div></div>
+        <div class="stat"><div class="label">件数</div><div class="value" id="pendingCount">-</div></div>
+      </div>
+      <div class="table-scroll" style="margin-top:14px;max-height:220px;overflow-y:auto;">
+        <table>
+          <thead><tr><th>取引日</th><th class="num">金額</th><th>入金予定日</th></tr></thead>
+          <tbody id="pendingBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>取引の明細(記帳の元データ)</h2>
+      <p class="lead" style="font-size:13px;margin-bottom:12px;">1件ずつの記録です。帳簿代わりに保管しておくと安心です。</p>
+      <div class="table-scroll" style="max-height:280px;overflow-y:auto;">
+        <table id="detailTable">
+          <thead><tr><th>日付</th><th class="num">売上</th><th class="num">手数料</th><th>支払方法</th><th>入金予定日</th></tr></thead>
+          <tbody id="detailBody"></tbody>
+        </table>
+      </div>
+      <button class="btn secondary" id="downloadDetailBtn">取引明細をCSVでダウンロード</button>
+    </div>
+
+  </div>
+
+  <div class="card">
+    <h2>減価償却費を計算する</h2>
+    <p class="lead" style="font-size:13px;margin-bottom:14px;">10万円以上の資産(内装・什器・機材など)を登録すると、指定した年の償却費を自動計算し、経費の「減価償却費」に反映します。※簡易的な定額法での概算です。耐用年数や按分の判断は必ず税理士等にご確認ください。</p>
+
+    <div class="formRow">
+      <label>資産名<input type="text" id="assetName" placeholder="例：内装工事(壁紙・塗装)"></label>
+      <label>取得年月<input type="month" id="assetDate"></label>
+      <label>取得価額(円)<input type="number" id="assetCost" placeholder="0" min="0"></label>
+      <label>耐用年数(年)<input type="number" id="assetLife" placeholder="例：15" min="1"></label>
+      <label>事業使用割合(%)<input type="number" id="assetRatio" value="100" min="1" max="100"></label>
+      <label>計算対象の年<input type="number" id="assetYear" placeholder="例：2026"></label>
+    </div>
+    <button class="btn" id="addAssetBtn">この資産を追加</button>
+
+    <div class="table-scroll" style="margin-top:16px;max-height:220px;overflow-y:auto;">
+      <table>
+        <thead><tr><th>資産名</th><th>取得年月</th><th class="num">取得価額</th><th>耐用年数</th><th class="num">本年分償却費</th><th></th></tr></thead>
+        <tbody id="assetBody"></tbody>
+      </table>
+    </div>
+
+    <div class="grid2" style="margin-top:14px;">
+      <button class="btn secondary" id="loadAssetBtn">資産データを読み込む(JSON)</button>
+      <button class="btn secondary" id="saveAssetBtn">資産データを保存(JSON)</button>
+    </div>
+    <input type="file" id="assetFileInput" accept=".json" style="display:none;">
+
+    <div class="stat" style="margin-top:14px;"><div class="label">減価償却費 合計(本年分)</div><div class="value" id="depreciationTotal">¥0</div></div>
+  </div>
+
+  <div id="errorArea"></div>
+
+  <footer>集計結果は必ずご自身でも見直してから決算書に転記してください。税額の最終判断は税務署・税理士にご確認ください。</footer>
+</div>
+
+<script>
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+const fileList = document.getElementById('fileList');
+const resultArea = document.getElementById('resultArea');
+const errorArea = document.getElementById('errorArea');
+const yearSelect = document.getElementById('yearSelect');
+
+// ---- 減価償却 ----
+let assetEntries = []; // {id, name, acqMonth('YYYY-MM'), cost, life, ratio, targetYear}
+let assetIdCounter = 1;
+
+document.getElementById('addAssetBtn').addEventListener('click', ()=>{
+  const name = document.getElementById('assetName').value.trim();
+  const acqMonth = document.getElementById('assetDate').value; // YYYY-MM
+  const cost = parseInt(document.getElementById('assetCost').value||'0',10);
+  const life = parseInt(document.getElementById('assetLife').value||'0',10);
+  const ratio = parseInt(document.getElementById('assetRatio').value||'100',10);
+  const targetYear = parseInt(document.getElementById('assetYear').value||'0',10);
+  if(!name || !acqMonth || !cost || !life || !targetYear){
+    showError('資産名・取得年月・取得価額・耐用年数・計算対象の年をすべて入力してください。');
+    return;
+  }
+  clearError();
+  assetEntries.push({id:assetIdCounter++, name, acqMonth, cost, life, ratio, targetYear});
+  document.getElementById('assetName').value='';
+  document.getElementById('assetCost').value='';
+  document.getElementById('assetLife').value='';
+  renderAssets();
+});
+
+function calcDepreciation(a){
+  const [ay, am] = a.acqMonth.split('-').map(Number);
+  const ty = a.targetYear;
+  if(ty < ay) return 0;
+  let months;
+  if(ty === ay) months = 13 - am; // acquisition year: from acquisition month to Dec
+  else months = 12; // later years: simplified full-year (does not track total remaining life)
+  const rate = 1/a.life;
+  const raw = a.cost * rate * (months/12) * (a.ratio/100);
+  return Math.round(raw);
+}
+
+function renderAssets(){
+  document.getElementById('assetBody').innerHTML = assetEntries.map(a=>`
+    <tr>
+      <td>${a.name}</td>
+      <td>${a.acqMonth}</td>
+      <td class="num">¥${a.cost.toLocaleString()}</td>
+      <td>${a.life}年</td>
+      <td class="num">¥${calcDepreciation(a).toLocaleString()}</td>
+      <td><button class="delBtn" data-aid="${a.id}">削除</button></td>
+    </tr>
+  `).join('');
+  document.querySelectorAll('[data-aid]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const id = parseInt(btn.dataset.aid,10);
+      assetEntries = assetEntries.filter(a=>a.id!==id);
+      renderAssets();
+    });
+  });
+  const total = assetEntries.reduce((s,a)=> s+calcDepreciation(a), 0);
+  document.getElementById('depreciationTotal').textContent = '¥'+total.toLocaleString();
+  renderExpenses();
+}
+
+document.getElementById('saveAssetBtn').addEventListener('click', ()=>{
+  const blob = new Blob([JSON.stringify(assetEntries,null,2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `減価償却資産データ_${new Date().toISOString().slice(0,10)}.json`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+});
+document.getElementById('loadAssetBtn').addEventListener('click', ()=>{
+  document.getElementById('assetFileInput').click();
+});
+document.getElementById('assetFileInput').addEventListener('change', async (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  try{
+    const data = JSON.parse(await file.text());
+    if(!Array.isArray(data)) throw new Error('invalid');
+    const maxId = data.reduce((m,d)=>Math.max(m,d.id||0),0);
+    assetIdCounter = Math.max(assetIdCounter, maxId+1);
+    const existing = new Set(assetEntries.map(a=>a.id));
+    data.forEach(d=>{ if(!existing.has(d.id)) assetEntries.push(d); });
+    renderAssets();
+  } catch(err){
+    showError('資産データの読み込みに失敗しました。このツールで保存したJSONファイルを選んでください。');
+  }
+});
+
+let allTransactions = []; // {date, year, month, total, fee, payLabel, day, refund}
+
+// ---- 売上(手入力) ----
+let manualSales = []; // {id, date, year, month, total, memo}
+let salesIdCounter = 1;
+
+document.getElementById('addSalesBtn').addEventListener('click', ()=>{
+  const date = document.getElementById('salesDate').value;
+  const amount = parseInt(document.getElementById('salesAmount').value||'0',10);
+  const memo = document.getElementById('salesMemo').value.trim();
+  if(!date){ showError('日付を入力してください。'); return; }
+  if(!amount || amount<=0){ showError('金額を入力してください。'); return; }
+  clearError();
+  const [y,m] = date.split('-');
+  manualSales.push({id:salesIdCounter++, date, year:y, month:parseInt(m,10), total:amount, memo});
+  document.getElementById('salesAmount').value='';
+  document.getElementById('salesMemo').value='';
+  renderManualSales();
+  syncYearOptions();
+  renderResults();
+});
+
+function renderManualSales(){
+  const sorted = [...manualSales].sort((a,b)=> a.date.localeCompare(b.date));
+  document.getElementById('manualSalesBody').innerHTML = sorted.map(s=>`
+    <tr>
+      <td>${s.date}</td>
+      <td class="num">¥${s.total.toLocaleString()}</td>
+      <td>${s.memo||''}</td>
+      <td><button class="delBtn" data-sid="${s.id}">削除</button></td>
+    </tr>
+  `).join('');
+  document.querySelectorAll('[data-sid]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const id = parseInt(btn.dataset.sid,10);
+      manualSales = manualSales.filter(s=>s.id!==id);
+      renderManualSales();
+      syncYearOptions();
+      renderResults();
+    });
+  });
+}
+
+document.getElementById('saveSalesBtn').addEventListener('click', ()=>{
+  const blob = new Blob([JSON.stringify(manualSales,null,2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `手入力売上データ_${new Date().toISOString().slice(0,10)}.json`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+});
+document.getElementById('loadSalesBtn').addEventListener('click', ()=>{
+  document.getElementById('salesFileInput').click();
+});
+document.getElementById('salesFileInput').addEventListener('change', async (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  try{
+    const data = JSON.parse(await file.text());
+    if(!Array.isArray(data)) throw new Error('invalid');
+    const maxId = data.reduce((m,d)=>Math.max(m,d.id||0),0);
+    salesIdCounter = Math.max(salesIdCounter, maxId+1);
+    const existing = new Set(manualSales.map(s=>s.id));
+    data.forEach(d=>{ if(!existing.has(d.id)) manualSales.push(d); });
+    renderManualSales();
+    syncYearOptions();
+    renderResults();
+  } catch(err){
+    showError('売上データの読み込みに失敗しました。このツールで保存したJSONファイルを選んでください。');
+  }
+});
+
+function syncYearOptions(){
+  const years = Array.from(new Set([
+    ...allTransactions.map(t=>t.year),
+    ...manualSales.map(s=>s.year)
+  ])).sort();
+  if(years.length===0) return;
+  const prev = yearSelect.value;
+  yearSelect.innerHTML = years.map(y=>`<option value="${y}">${y}年</option>`).join('');
+  yearSelect.value = years.includes(prev) ? prev : years[years.length-1];
+  resultArea.classList.remove('hidden');
+}
+
+// ---- 経費(仕訳) ----
+const EXPENSE_CATEGORIES = ['租税公課','荷造運賃','水道光熱費','旅費交通費','通信費','広告宣伝費','接待交際費','損害保険料','修繕費','消耗品費','減価償却費','福利厚生費','給料賃金','外注工賃','利子割引料','地代家賃','貸倒金','雑費'];
+let expenseEntries = []; // {id, date, category, amount, memo}
+let expIdCounter = 1;
+
+const expCategorySelect = document.getElementById('expCategory');
+expCategorySelect.innerHTML = EXPENSE_CATEGORIES.map(c=>`<option value="${c}">${c}</option>`).join('');
+
+document.getElementById('addExpenseBtn').addEventListener('click', ()=>{
+  const date = document.getElementById('expDate').value;
+  const category = expCategorySelect.value;
+  const amount = parseInt(document.getElementById('expAmount').value || '0', 10);
+  const memo = document.getElementById('expMemo').value.trim();
+  if(!date){ showError('日付を入力してください。'); return; }
+  if(!amount || amount<=0){ showError('金額を入力してください。'); return; }
+  clearError();
+  expenseEntries.push({id:expIdCounter++, date, category, amount, memo});
+  document.getElementById('expAmount').value='';
+  document.getElementById('expMemo').value='';
+  renderExpenses();
+});
+
+function getDepreciationTotal(){
+  return assetEntries.reduce((s,a)=> s+calcDepreciation(a), 0);
+}
+
+function renderExpenses(){
+  const sorted = [...expenseEntries].sort((a,b)=> a.date.localeCompare(b.date));
+  document.getElementById('expenseBody').innerHTML = sorted.map(e=>`
+    <tr>
+      <td>${e.date}</td>
+      <td>${e.category}</td>
+      <td class="num">¥${e.amount.toLocaleString()}</td>
+      <td>${e.memo||''}</td>
+      <td><button class="delBtn" data-id="${e.id}">削除</button></td>
+    </tr>
+  `).join('');
+  document.querySelectorAll('.delBtn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const id = parseInt(btn.dataset.id,10);
+      expenseEntries = expenseEntries.filter(e=>e.id!==id);
+      renderExpenses();
+    });
+  });
+
+  const totals = {};
+  EXPENSE_CATEGORIES.forEach(c=> totals[c]=0 );
+  expenseEntries.forEach(e=>{ totals[e.category] = (totals[e.category]||0) + e.amount; });
+  totals['減価償却費'] = (totals['減価償却費']||0) + getDepreciationTotal();
+  const grandTotal = Object.values(totals).reduce((a,b)=>a+b,0);
+
+  document.getElementById('categoryBody').innerHTML = EXPENSE_CATEGORIES.map(c=>`
+    <tr><td>${c}</td><td class="num">${totals[c]?('¥'+totals[c].toLocaleString()):'—'}</td></tr>
+  `).join('') + `<tr class="total"><td>計</td><td class="num">¥${grandTotal.toLocaleString()}</td></tr>`;
+
+  updatePnl(grandTotal);
+}
+
+function updatePnl(expenseTotal){
+  const pnl = document.getElementById('pnlSummary');
+  const hasExpenses = expenseEntries.length>0;
+  const hasSales = allTransactions.length>0 && currentMonthly;
+  if(!hasExpenses && !hasSales){ pnl.classList.add('hidden'); return; }
+  pnl.classList.remove('hidden');
+  const sales = hasSales ? currentMonthly.totalSales : 0;
+  document.getElementById('pnlSales').textContent = '¥'+sales.toLocaleString();
+  document.getElementById('pnlExpenses').textContent = '¥'+expenseTotal.toLocaleString();
+  document.getElementById('pnlNet').textContent = '¥'+(sales-expenseTotal).toLocaleString();
+}
+
+document.getElementById('saveExpenseBtn').addEventListener('click', ()=>{
+  const blob = new Blob([JSON.stringify(expenseEntries, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `経費データ_${new Date().toISOString().slice(0,10)}.json`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+});
+
+document.getElementById('loadExpenseBtn').addEventListener('click', ()=>{
+  document.getElementById('expenseFileInput').click();
+});
+document.getElementById('expenseFileInput').addEventListener('change', async (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  try{
+    const text = await file.text();
+    const data = JSON.parse(text);
+    if(!Array.isArray(data)) throw new Error('invalid');
+    const maxId = data.reduce((m,d)=>Math.max(m,d.id||0),0);
+    expIdCounter = Math.max(expIdCounter, maxId+1);
+    const existingKeys = new Set(expenseEntries.map(e=>e.id));
+    data.forEach(d=>{
+      if(!existingKeys.has(d.id)) expenseEntries.push(d);
+    });
+    renderExpenses();
+  } catch(err){
+    showError('経費データの読み込みに失敗しました。このツールで保存したJSONファイルを選んでください。');
+  }
+});
+
+document.getElementById('downloadExpenseCsvBtn').addEventListener('click', ()=>{
+  const totals = {};
+  EXPENSE_CATEGORIES.forEach(c=> totals[c]=0 );
+  expenseEntries.forEach(e=>{ totals[e.category] = (totals[e.category]||0) + e.amount; });
+  totals['減価償却費'] = (totals['減価償却費']||0) + getDepreciationTotal();
+  const lines = ['科目,金額'];
+  EXPENSE_CATEGORIES.forEach(c=> lines.push(`${c},${totals[c]}`));
+  const grand = Object.values(totals).reduce((a,b)=>a+b,0);
+  lines.push(`計,${grand}`);
+  downloadCSV(lines.join('\r\n'), `経費科目別集計.csv`);
+});
+
+renderAssets();
+
+['dragover','dragleave','drop'].forEach(evt=>{
+  dropZone.addEventListener(evt, e=>{
+    e.preventDefault();
+    dropZone.classList.toggle('drag', evt==='dragover');
+  });
+});
+dropZone.addEventListener('drop', e=>{ handleFiles(e.dataTransfer.files); });
+fileInput.addEventListener('change', e=>{ handleFiles(e.target.files); });
+yearSelect.addEventListener('change', renderResults);
+
+function showError(msg){
+  errorArea.innerHTML = `<div class="card"><div class="msg warn">${msg}</div></div>`;
+}
+function clearError(){ errorArea.innerHTML=''; }
+
+function yen(s){
+  if(s===undefined||s===null) return 0;
+  s = String(s).trim();
+  if(s===''||s==='""') return 0;
+  let neg=false;
+  if(s.startsWith('(')&&s.endsWith(')')){neg=true;s=s.slice(1,-1);}
+  if(s.startsWith('-')){neg=true;s=s.slice(1);}
+  s = s.replace(/[¥,]/g,'').trim();
+  if(s==='') return 0;
+  const v = parseInt(s,10);
+  if(isNaN(v)) return 0;
+  return neg?-v:v;
+}
+
+const PAY_COLS = ['現金','カード','Squareギフトカード','その他','PayPay','Alipay','au PAY','d払い','メルペイ','楽天ペイ','WeChat Pay'];
+
+function decodeFile(buf){
+  const u = new Uint8Array(buf);
+  if(u[0]===0xFF && u[1]===0xFE) return new TextDecoder('utf-16le').decode(u);
+  if(u[0]===0xEF && u[1]===0xBB && u[2]===0xBF) return new TextDecoder('utf-8').decode(u.slice(3));
+  return new TextDecoder('utf-8').decode(u);
+}
+
+function parseTSV(text){
+  // simple tab-delimited parser supporting quoted multiline fields
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  for(let i=0;i<text.length;i++){
+    const c = text[i];
+    if(inQuotes){
+      if(c === '"'){
+        if(text[i+1] === '"'){ field += '"'; i++; }
+        else inQuotes = false;
+      } else field += c;
+    } else {
+      if(c === '"') inQuotes = true;
+      else if(c === '\t'){ row.push(field); field=''; }
+      else if(c === '\n'){ row.push(field); field=''; rows.push(row); row=[]; }
+      else if(c === '\r'){ /* skip */ }
+      else field += c;
+    }
+  }
+  if(field!=='' || row.length){ row.push(field); rows.push(row); }
+  return rows;
+}
+
+async function handleFiles(files){
+  clearError();
+  const arr = Array.from(files);
+  if(!arr.length) return;
+  fileList.innerHTML = arr.map(f=>`<div>✓ ${f.name}</div>`).join('');
+
+  let newTx = [];
+  let anyValid = false;
+
+  for(const file of arr){
+    const buf = await file.arrayBuffer();
+    const text = decodeFile(buf);
+    const rows = parseTSV(text);
+    if(rows.length < 2) continue;
+    const header = rows[0];
+    const idx = {};
+    header.forEach((h,i)=> idx[h.trim()]=i );
+    if(idx['日付']===undefined || idx['受取合計額']===undefined){
+      continue; // skip files that aren't the transaction export
+    }
+    anyValid = true;
+    for(let r=1;r<rows.length;r++){
+      const row = rows[r];
+      if(!row || row.length < header.length) continue;
+      const date = row[idx['日付']];
+      if(!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+      const [y,m,d] = date.split('-');
+      let total = yen(row[idx['受取合計額']]);
+      const fee = Math.abs(yen(row[idx['手数料']]));
+      const refund = total < 0;
+      total = Math.abs(total);
+      const labels = [];
+      PAY_COLS.forEach(c=>{
+        if(idx[c]===undefined) return;
+        const amt = yen(row[idx[c]]);
+        if(amt>0){
+          if(c==='カード'){
+            const ct = row[idx['カード種別']];
+            labels.push('カード'+(ct && ct!=='""' ? `(${ct})` : ''));
+          } else labels.push(c);
+        }
+      });
+      const payLabel = labels.length ? labels.join('+') : '-';
+      const depositDate = idx['入金日']!==undefined ? (row[idx['入金日']]||'').trim() : '';
+      const key = (idx['支払いID']!==undefined ? row[idx['支払いID']] : date+total+payLabel);
+      newTx.push({date, year:y, month:parseInt(m,10), day:d, total, fee, payLabel, refund, key, depositDate});
+    }
+  }
+
+  if(!anyValid){
+    showError('取引CSVとして認識できるファイルがありませんでした。「お取引」画面からエクスポートしたCSVを選んでください。');
+    return;
+  }
+
+  // merge, dedupe by key
+  const seen = new Set(allTransactions.map(t=>t.key));
+  newTx.forEach(t=>{
+    if(!seen.has(t.key)){ allTransactions.push(t); seen.add(t.key); }
+  });
+
+  if(allTransactions.length===0){
+    showError('取引データが見つかりませんでした。');
+    return;
+  }
+
+  syncYearOptions();
+  renderResults();
+}
+
+let currentMonthly = null;
+let currentDetail = null;
+
+function renderResults(){
+  if(!yearSelect.value) return;
+  const year = yearSelect.value;
+  const squareTx = allTransactions.filter(t=>t.year===year).map(t=>({...t, source:'Square'}));
+  const manualTx = manualSales.filter(s=>s.year===year).map(s=>({
+    date:s.date, year:s.year, month:s.month, total:s.total, fee:0,
+    payLabel:s.memo||'手入力', refund:false, depositDate:'', source:'手入力'
+  }));
+  const tx = [...squareTx, ...manualTx].sort((a,b)=> a.date.localeCompare(b.date) || 0);
+
+  const monthly = Array.from({length:12}, (_,i)=>({month:i+1, sales:0, count:0}));
+  let totalSales=0, totalFee=0, count=0;
+  let minDate=null, maxDate=null;
+
+  tx.forEach(t=>{
+    if(!minDate||t.date<minDate) minDate=t.date;
+    if(!maxDate||t.date>maxDate) maxDate=t.date;
+    if(!t.refund){
+      monthly[t.month-1].sales += t.total;
+      monthly[t.month-1].count += 1;
+      totalSales += t.total;
+      count += 1;
+    } else {
+      monthly[t.month-1].sales -= t.total;
+    }
+    totalFee += t.fee;
+  });
+
+  document.getElementById('totalSales').textContent = '¥' + totalSales.toLocaleString();
+  document.getElementById('totalCount').textContent = `${count}件の取引(${year}年)`;
+  document.getElementById('totalFee').textContent = '¥' + totalFee.toLocaleString();
+  document.getElementById('dataRange').textContent = minDate ? `${minDate}〜${maxDate}` : '-';
+
+  document.getElementById('monthlyBody').innerHTML = monthly.map(m=>`
+    <tr><td>${m.month}月</td><td class="num">${m.sales?('¥'+m.sales.toLocaleString()):'—'}</td><td class="num">${m.count||'—'}</td></tr>
+  `).join('') + `<tr class="total"><td>計</td><td class="num">¥${totalSales.toLocaleString()}</td><td class="num">${count}</td></tr>`;
+
+  document.getElementById('detailBody').innerHTML = tx.map(t=>`
+    <tr>
+      <td>${t.date}</td>
+      <td class="num">${t.refund?('-¥'+t.total.toLocaleString()):('¥'+t.total.toLocaleString())}</td>
+      <td class="num">${t.fee?('¥'+t.fee.toLocaleString()):'—'}</td>
+      <td>${t.payLabel}<span style="color:var(--ink-soft);font-size:11px;"> ・ ${t.source}</span></td>
+      <td>${t.depositDate||'—'}</td>
+    </tr>
+  `).join('');
+
+  renderPending();
+
+  currentMonthly = {year, monthly, totalSales, totalFee, count};
+  currentDetail = tx;
+  renderExpenses();
+}
+
+function renderPending(){
+  const today = new Date().toISOString().slice(0,10);
+  const pending = allTransactions.filter(t=> !t.refund && (!t.depositDate || t.depositDate > today));
+  const total = pending.reduce((s,t)=> s+t.total, 0);
+  document.getElementById('pendingTotal').textContent = '¥'+total.toLocaleString();
+  document.getElementById('pendingCount').textContent = pending.length+'件';
+  document.getElementById('pendingBody').innerHTML = pending
+    .sort((a,b)=> a.date.localeCompare(b.date))
+    .map(t=>`<tr><td>${t.date}</td><td class="num">¥${t.total.toLocaleString()}</td><td>${t.depositDate||'未確定'}</td></tr>`)
+    .join('') || '<tr><td colspan="3">入金待ちの取引はありません</td></tr>';
+}
+
+document.getElementById('downloadMonthlyBtn').addEventListener('click', ()=>{
+  if(!currentMonthly) return;
+  const lines = ['月,売上(収入)金額,取引件数'];
+  currentMonthly.monthly.forEach(m=> lines.push(`${m.month},${m.sales},${m.count}`));
+  lines.push(`計,${currentMonthly.totalSales},${currentMonthly.count}`);
+  downloadCSV(lines.join('\r\n'), `月別売上_${currentMonthly.year}.csv`);
+});
+
+document.getElementById('downloadDetailBtn').addEventListener('click', ()=>{
+  if(!currentDetail) return;
+  const lines = ['日付,売上,手数料,支払方法,入金予定日,区分'];
+  currentDetail.forEach(t=> lines.push(`${t.date},${t.refund?-t.total:t.total},${t.fee},"${t.payLabel}",${t.depositDate||''},${t.source}`));
+  downloadCSV(lines.join('\r\n'), `取引明細_${yearSelect.value}.csv`);
+});
+
+function downloadCSV(csv, filename){
+  const blob = new Blob(['\uFEFF'+csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+</script>
+</body>
+</html>
