@@ -221,6 +221,18 @@
     </div>
 
     <div class="card">
+      <h2>入金消込 — やよいの「振替」入力にそのまま使えます</h2>
+      <p class="lead" style="font-size:13px;margin-bottom:12px;">Squareの入金(振込)ごとに、対象になった売上と手数料をまとめました。やよいで「売掛金→預金」の振替を入力するとき、<b>金額欄には「売上合計」</b>、自己負担を選んだ後に出てくる<b>「振込手数料」欄には「手数料合計」</b>を入れれば、探したり計算したりする必要がなくなります。</p>
+      <div class="table-scroll" style="max-height:320px;overflow-y:auto;">
+        <table>
+          <thead><tr><th>入金日</th><th class="num">対象件数</th><th class="num">売上合計</th><th class="num">手数料合計</th><th class="num">差引入金額(通帳照合用)</th></tr></thead>
+          <tbody id="reconcileBody"></tbody>
+        </table>
+      </div>
+      <button class="btn secondary" id="downloadReconcileBtn">入金消込リストをCSVでダウンロード</button>
+    </div>
+
+    <div class="card">
       <h2>入金待ち(まだ銀行に振り込まれていない分)</h2>
       <p class="lead" style="font-size:13px;margin-bottom:12px;">Squareは決済から数日後に銀行へまとめて入金される仕組みです。ここは売上の計上とは関係なく、単に「振り込まれるはずのお金」を確認するための一覧です。</p>
       <div class="grid2">
@@ -681,8 +693,9 @@ async function handleFiles(files){
       });
       const payLabel = labels.length ? labels.join('+') : '-';
       const depositDate = idx['入金日']!==undefined ? (row[idx['入金日']]||'').trim() : '';
+      const transferId = idx['振込ID']!==undefined ? (row[idx['振込ID']]||'').trim() : '';
       const key = (idx['支払いID']!==undefined ? row[idx['支払いID']] : date+total+payLabel);
-      newTx.push({date, year:y, month:parseInt(m,10), day:d, total, fee, payLabel, refund, key, depositDate});
+      newTx.push({date, year:y, month:parseInt(m,10), day:d, total, fee, payLabel, refund, key, depositDate, transferId});
     }
   }
 
@@ -757,11 +770,48 @@ function renderResults(){
   `).join('');
 
   renderPending();
+  renderReconcile();
 
   currentMonthly = {year, monthly, totalSales, totalFee, count};
   currentDetail = tx;
   renderExpenses();
 }
+
+let currentReconcile = null;
+
+function renderReconcile(){
+  const year = yearSelect.value;
+  const squareTx = allTransactions.filter(t=>t.year===year && !t.refund);
+
+  const groups = {};
+  squareTx.forEach(t=>{
+    const gkey = t.transferId || ('未確定_'+(t.depositDate||t.date));
+    if(!groups[gkey]) groups[gkey] = {depositDate: t.depositDate||'未確定', count:0, sales:0, fee:0};
+    groups[gkey].count++;
+    groups[gkey].sales += t.total;
+    groups[gkey].fee += t.fee;
+  });
+
+  const rows = Object.values(groups).sort((a,b)=> (a.depositDate||'').localeCompare(b.depositDate||''));
+  currentReconcile = rows;
+
+  document.getElementById('reconcileBody').innerHTML = rows.map(g=>`
+    <tr>
+      <td>${g.depositDate}</td>
+      <td class="num">${g.count}件</td>
+      <td class="num">¥${g.sales.toLocaleString()}</td>
+      <td class="num">¥${g.fee.toLocaleString()}</td>
+      <td class="num">¥${(g.sales-g.fee).toLocaleString()}</td>
+    </tr>
+  `).join('') || '<tr><td colspan="5">データがありません</td></tr>';
+}
+
+document.getElementById('downloadReconcileBtn').addEventListener('click', ()=>{
+  if(!currentReconcile) return;
+  const lines = ['入金日,対象件数,売上合計,手数料合計,差引入金額'];
+  currentReconcile.forEach(g=> lines.push(`${g.depositDate},${g.count},${g.sales},${g.fee},${g.sales-g.fee}`));
+  downloadCSV(lines.join('\r\n'), `入金消込_${yearSelect.value}.csv`);
+});
 
 function renderPending(){
   const today = new Date().toISOString().slice(0,10);
