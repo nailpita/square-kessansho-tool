@@ -67,7 +67,9 @@
   tr.total td{font-weight:700;border-top:2px solid var(--ink);border-bottom:none;}
   .table-scroll{border-radius:8px;border:1px solid var(--line);overflow:hidden;}
 
-  .formRow{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .formRow{display:grid;grid-template-columns:1fr 1fr;gap:10px;min-width:0;}
+  .formRow label{min-width:0;}
+  .formRow input,.formRow select{min-width:0;}
   .formRow label{display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:var(--ink-soft);}
   .formRow input,.formRow select{
     font-family:'Noto Sans JP',sans-serif;font-size:14px;padding:9px 10px;
@@ -221,8 +223,8 @@
     </div>
 
     <div class="card">
-      <h2>入金消込 — やよいの「振替」入力にそのまま使えます</h2>
-      <p class="lead" style="font-size:13px;margin-bottom:12px;">Squareの入金(振込)ごとに、対象になった売上と手数料をまとめました。やよいで「売掛金→預金」の振替を入力するとき、<b>金額欄には「売上合計」</b>、自己負担を選んだ後に出てくる<b>「振込手数料」欄には「手数料合計」</b>を入れれば、探したり計算したりする必要がなくなります。</p>
+      <h2>入金消込 — 売掛金(Square)の状況が一目でわかる</h2>
+      <p class="lead" style="font-size:13px;margin-bottom:12px;">Squareの入金(振込)ごとに、対象になった売上と手数料をまとめました。<b>今どの売上がまだ入金待ちで、いくら手数料が引かれて実際の入金額になっているか</b>が、通帳やレポート画面を見比べなくても一目でわかります。会計ソフトへ入力する際の「売上合計」「手数料合計」の参照元としても使えます。</p>
       <div class="table-scroll" style="max-height:320px;overflow-y:auto;">
         <table>
           <thead><tr><th>入金日</th><th class="num">対象件数</th><th class="num">売上合計</th><th class="num">手数料合計</th><th class="num">差引入金額(通帳照合用)</th></tr></thead>
