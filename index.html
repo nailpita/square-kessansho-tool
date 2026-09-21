@@ -133,6 +133,7 @@
       <label style="grid-column:1/-1;">摘要(メモ)<input type="text" id="salesMemo" placeholder="例：店販商品を現金販売"></label>
     </div>
     <button class="btn" id="addSalesBtn">この売上を追加</button>
+    <button class="btn secondary hidden" id="cancelSalesEditBtn" style="margin-top:8px;">編集をキャンセル</button>
 
     <div class="table-scroll" style="margin-top:16px;max-height:220px;overflow-y:auto;">
       <table>
@@ -159,6 +160,7 @@
       <label>摘要(メモ)<input type="text" id="expMemo" placeholder="例：ジェルカラー仕入"></label>
     </div>
     <button class="btn" id="addExpenseBtn">この内容を追加</button>
+    <button class="btn secondary hidden" id="cancelExpenseEditBtn" style="margin-top:8px;">編集をキャンセル</button>
 
     <div class="table-scroll" style="margin-top:16px;max-height:220px;overflow-y:auto;" id="expenseListWrap">
       <table>
@@ -280,6 +282,7 @@
       <label>計算対象の年<input type="number" id="assetYear" placeholder="例：2026"></label>
     </div>
     <button class="btn" id="addAssetBtn">この資産を追加</button>
+    <button class="btn secondary hidden" id="cancelAssetEditBtn" style="margin-top:8px;">編集をキャンセル</button>
 
     <div class="table-scroll" style="margin-top:16px;max-height:220px;overflow-y:auto;">
       <table>
@@ -319,6 +322,7 @@ const yearSelect = document.getElementById('yearSelect');
 // ---- 減価償却 ----
 let assetEntries = []; // {id, name, acqMonth('YYYY-MM'), cost, life, ratio, targetYear}
 let assetIdCounter = 1;
+let editingAssetId = null;
 
 document.getElementById('addAssetBtn').addEventListener('click', ()=>{
   const name = document.getElementById('assetName').value.trim();
@@ -332,13 +336,35 @@ document.getElementById('addAssetBtn').addEventListener('click', ()=>{
     return;
   }
   clearError();
-  assetEntries.push({id:assetIdCounter++, name, acqMonth, cost, life, ratio, targetYear});
+  if(editingAssetId){
+    const a = assetEntries.find(a=>a.id===editingAssetId);
+    a.name=name; a.acqMonth=acqMonth; a.cost=cost; a.life=life; a.ratio=ratio; a.targetYear=targetYear;
+    exitAssetEdit();
+  } else {
+    assetEntries.push({id:assetIdCounter++, name, acqMonth, cost, life, ratio, targetYear});
+  }
   document.getElementById('assetName').value='';
+  document.getElementById('assetDate').value='';
   document.getElementById('assetCost').value='';
   document.getElementById('assetLife').value='';
+  document.getElementById('assetRatio').value='100';
+  document.getElementById('assetYear').value='';
   syncYearOptions();
   renderAssets();
 });
+
+function exitAssetEdit(){
+  editingAssetId = null;
+  document.getElementById('addAssetBtn').textContent = 'この資産を追加';
+  document.getElementById('cancelAssetEditBtn').classList.add('hidden');
+  document.getElementById('assetName').value='';
+  document.getElementById('assetDate').value='';
+  document.getElementById('assetCost').value='';
+  document.getElementById('assetLife').value='';
+  document.getElementById('assetRatio').value='100';
+  document.getElementById('assetYear').value='';
+}
+document.getElementById('cancelAssetEditBtn').addEventListener('click', exitAssetEdit);
 
 function calcDepreciation(a){
   const [ay, am] = a.acqMonth.split('-').map(Number);
@@ -360,14 +386,32 @@ function renderAssets(){
       <td class="num">¥${a.cost.toLocaleString()}</td>
       <td>${a.life}年</td>
       <td class="num">¥${calcDepreciation(a).toLocaleString()}</td>
-      <td><button class="delBtn" data-aid="${a.id}">削除</button></td>
+      <td><button class="delBtn" data-aedit="${a.id}">編集</button> <button class="delBtn" data-aid="${a.id}">削除</button></td>
     </tr>
   `).join('');
-  document.querySelectorAll('[data-aid]').forEach(btn=>{
+  document.querySelectorAll('#assetBody [data-aid]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const id = parseInt(btn.dataset.aid,10);
       assetEntries = assetEntries.filter(a=>a.id!==id);
+      if(editingAssetId===id) exitAssetEdit();
       renderAssets();
+    });
+  });
+  document.querySelectorAll('#assetBody [data-aedit]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const id = parseInt(btn.dataset.aedit,10);
+      const a = assetEntries.find(a=>a.id===id);
+      if(!a) return;
+      editingAssetId = id;
+      document.getElementById('assetName').value = a.name;
+      document.getElementById('assetDate').value = a.acqMonth;
+      document.getElementById('assetCost').value = a.cost;
+      document.getElementById('assetLife').value = a.life;
+      document.getElementById('assetRatio').value = a.ratio;
+      document.getElementById('assetYear').value = a.targetYear;
+      document.getElementById('addAssetBtn').textContent = 'この内容で更新';
+      document.getElementById('cancelAssetEditBtn').classList.remove('hidden');
+      document.getElementById('assetName').scrollIntoView({behavior:'smooth', block:'center'});
     });
   });
   const year = yearSelect.value;
@@ -409,6 +453,7 @@ let allTransactions = []; // {date, year, month, total, fee, payLabel, day, refu
 // ---- 売上(手入力) ----
 let manualSales = []; // {id, date, year, month, total, memo}
 let salesIdCounter = 1;
+let editingSalesId = null;
 
 document.getElementById('addSalesBtn').addEventListener('click', ()=>{
   const date = document.getElementById('salesDate').value;
@@ -418,13 +463,30 @@ document.getElementById('addSalesBtn').addEventListener('click', ()=>{
   if(!amount || amount<=0){ showError('金額を入力してください。'); return; }
   clearError();
   const [y,m] = date.split('-');
-  manualSales.push({id:salesIdCounter++, date, year:y, month:parseInt(m,10), total:amount, memo});
+  if(editingSalesId){
+    const s = manualSales.find(s=>s.id===editingSalesId);
+    s.date=date; s.year=y; s.month=parseInt(m,10); s.total=amount; s.memo=memo;
+    exitSalesEdit();
+  } else {
+    manualSales.push({id:salesIdCounter++, date, year:y, month:parseInt(m,10), total:amount, memo});
+  }
+  document.getElementById('salesDate').value='';
   document.getElementById('salesAmount').value='';
   document.getElementById('salesMemo').value='';
   renderManualSales();
   syncYearOptions();
   renderResults();
 });
+
+function exitSalesEdit(){
+  editingSalesId = null;
+  document.getElementById('addSalesBtn').textContent = 'この売上を追加';
+  document.getElementById('cancelSalesEditBtn').classList.add('hidden');
+  document.getElementById('salesDate').value='';
+  document.getElementById('salesAmount').value='';
+  document.getElementById('salesMemo').value='';
+}
+document.getElementById('cancelSalesEditBtn').addEventListener('click', exitSalesEdit);
 
 function renderManualSales(){
   const sorted = [...manualSales].sort((a,b)=> a.date.localeCompare(b.date));
@@ -433,16 +495,31 @@ function renderManualSales(){
       <td>${s.date}</td>
       <td class="num">¥${s.total.toLocaleString()}</td>
       <td>${s.memo||''}</td>
-      <td><button class="delBtn" data-sid="${s.id}">削除</button></td>
+      <td><button class="delBtn" data-sedit="${s.id}">編集</button> <button class="delBtn" data-sid="${s.id}">削除</button></td>
     </tr>
   `).join('');
   document.querySelectorAll('[data-sid]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const id = parseInt(btn.dataset.sid,10);
       manualSales = manualSales.filter(s=>s.id!==id);
+      if(editingSalesId===id) exitSalesEdit();
       renderManualSales();
       syncYearOptions();
       renderResults();
+    });
+  });
+  document.querySelectorAll('[data-sedit]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const id = parseInt(btn.dataset.sedit,10);
+      const s = manualSales.find(s=>s.id===id);
+      if(!s) return;
+      editingSalesId = id;
+      document.getElementById('salesDate').value = s.date;
+      document.getElementById('salesAmount').value = s.total;
+      document.getElementById('salesMemo').value = s.memo||'';
+      document.getElementById('addSalesBtn').textContent = 'この内容で更新';
+      document.getElementById('cancelSalesEditBtn').classList.remove('hidden');
+      document.getElementById('salesDate').scrollIntoView({behavior:'smooth', block:'center'});
     });
   });
 }
@@ -496,6 +573,7 @@ function syncYearOptions(){
 const EXPENSE_CATEGORIES = ['租税公課','荷造運賃','水道光熱費','旅費交通費','通信費','広告宣伝費','接待交際費','損害保険料','修繕費','消耗品費','減価償却費','福利厚生費','給料賃金','外注工賃','利子割引料','地代家賃','貸倒金','雑費'];
 let expenseEntries = []; // {id, date, category, amount, memo}
 let expIdCounter = 1;
+let editingExpenseId = null;
 
 const expCategorySelect = document.getElementById('expCategory');
 expCategorySelect.innerHTML = EXPENSE_CATEGORIES.map(c=>`<option value="${c}">${c}</option>`).join('');
@@ -508,12 +586,29 @@ document.getElementById('addExpenseBtn').addEventListener('click', ()=>{
   if(!date){ showError('日付を入力してください。'); return; }
   if(!amount || amount<=0){ showError('金額を入力してください。'); return; }
   clearError();
-  expenseEntries.push({id:expIdCounter++, date, category, amount, memo});
+  if(editingExpenseId){
+    const ex = expenseEntries.find(e=>e.id===editingExpenseId);
+    ex.date=date; ex.category=category; ex.amount=amount; ex.memo=memo;
+    exitExpenseEdit();
+  } else {
+    expenseEntries.push({id:expIdCounter++, date, category, amount, memo});
+  }
+  document.getElementById('expDate').value='';
   document.getElementById('expAmount').value='';
   document.getElementById('expMemo').value='';
   syncYearOptions();
   renderExpenses();
 });
+
+function exitExpenseEdit(){
+  editingExpenseId = null;
+  document.getElementById('addExpenseBtn').textContent = 'この内容を追加';
+  document.getElementById('cancelExpenseEditBtn').classList.add('hidden');
+  document.getElementById('expDate').value='';
+  document.getElementById('expAmount').value='';
+  document.getElementById('expMemo').value='';
+}
+document.getElementById('cancelExpenseEditBtn').addEventListener('click', exitExpenseEdit);
 
 function getDepreciationTotal(year){
   return assetEntries.filter(a=>String(a.targetYear)===String(year)).reduce((s,a)=> s+calcDepreciation(a), 0);
@@ -529,14 +624,30 @@ function renderExpenses(){
       <td>${e.category}</td>
       <td class="num">¥${e.amount.toLocaleString()}</td>
       <td>${e.memo||''}</td>
-      <td><button class="delBtn" data-id="${e.id}">削除</button></td>
+      <td><button class="delBtn" data-eedit="${e.id}">編集</button> <button class="delBtn" data-id="${e.id}">削除</button></td>
     </tr>
   `).join('');
-  document.querySelectorAll('.delBtn').forEach(btn=>{
+  document.querySelectorAll('#expenseBody [data-id]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const id = parseInt(btn.dataset.id,10);
       expenseEntries = expenseEntries.filter(e=>e.id!==id);
+      if(editingExpenseId===id) exitExpenseEdit();
       renderExpenses();
+    });
+  });
+  document.querySelectorAll('#expenseBody [data-eedit]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const id = parseInt(btn.dataset.eedit,10);
+      const e = expenseEntries.find(e=>e.id===id);
+      if(!e) return;
+      editingExpenseId = id;
+      document.getElementById('expDate').value = e.date;
+      expCategorySelect.value = e.category;
+      document.getElementById('expAmount').value = e.amount;
+      document.getElementById('expMemo').value = e.memo||'';
+      document.getElementById('addExpenseBtn').textContent = 'この内容で更新';
+      document.getElementById('cancelExpenseEditBtn').classList.remove('hidden');
+      document.getElementById('expDate').scrollIntoView({behavior:'smooth', block:'center'});
     });
   });
 
