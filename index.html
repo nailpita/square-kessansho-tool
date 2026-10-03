@@ -194,6 +194,7 @@
         <tbody id="categoryBody"></tbody>
       </table>
     </div>
+    <p class="hint" id="autoFeeNote" style="margin-top:8px;"></p>
     <button class="btn secondary" id="downloadExpenseCsvBtn">科目別集計をCSVでダウンロード</button>
   </div>
 
@@ -242,7 +243,8 @@
 
     <div class="card">
       <h2>入金消込 — 売掛金(Square)の状況が一目でわかる</h2>
-      <p class="lead" style="font-size:13px;margin-bottom:12px;">Squareの入金(振込)ごとに、対象になった売上と手数料をまとめました。<b>今どの売上がまだ入金待ちで、いくら手数料が引かれて実際の入金額になっているか</b>が、通帳やレポート画面を見比べなくても一目でわかります。会計ソフトへ入力する際の「売上合計」「手数料合計」の参照元としても使えます。</p>
+      <p class="lead" style="font-size:13px;margin-bottom:12px;">Squareの入金(振込)ごとに、対象になった売上と手数料をまとめました。<b>今どの売上がまだ入金待ちで、いくら手数料が引かれて実際の入金額になっているか</b>が、通帳やレポート画面を見比べなくても一目でわかります。</p>
+      <div class="note">💡 決済手数料は、下の「貸借対照表」「経費の科目別集計」に<b>自動で1回だけ計上</b>されます。手数料を自分で経費として追加入力する必要はありません(二重に計上されてしまう原因になるため、入力しないでください)。</div>
       <div class="table-scroll" style="max-height:320px;overflow-y:auto;">
         <table>
           <thead><tr><th>入金日</th><th class="num">対象件数</th><th class="num">売上合計</th><th class="num">手数料合計</th><th class="num">差引入金額(通帳照合用)</th></tr></thead>
@@ -382,6 +384,15 @@
     </div>
     <div class="msg" id="bsCheckMsg" style="margin-top:12px;"></div>
     <button class="btn secondary" id="downloadBsBtn" style="margin-top:10px;">貸借対照表をCSVでダウンロード</button>
+
+    <h2 style="margin-top:22px;">通帳残高と照合する(任意の日付でチェック)</h2>
+    <p class="lead" style="font-size:13px;margin-bottom:12px;">月末など好きなタイミングで、帳簿上の普通預金残高と実際の通帳残高を突き合わせます。ズレがあれば早めに気づけます。</p>
+    <div class="formRow">
+      <label>照合する日付<input type="date" id="reconcileDate"></label>
+      <label>通帳の実際の残高(円)<input type="number" id="actualBankBalance" placeholder="0"></label>
+    </div>
+    <button class="btn secondary" id="checkBankBtn">照合する</button>
+    <div class="msg" id="bankCheckMsg" style="margin-top:12px;"></div>
   </div>
 
   <div id="errorArea"></div>
@@ -748,13 +759,22 @@ function renderExpenses(){
   EXPENSE_CATEGORIES.forEach(c=> totals[c]=0 );
   yearExpenses.forEach(e=>{ totals[e.category] = (totals[e.category]||0) + e.amount; });
   totals['減価償却費'] = (totals['減価償却費']||0) + getDepreciationTotal(year);
+  const autoFee = getAutoSquareFee(year);
+  totals['雑費'] = (totals['雑費']||0) + autoFee;
   const grandTotal = Object.values(totals).reduce((a,b)=>a+b,0);
 
   document.getElementById('categoryBody').innerHTML = EXPENSE_CATEGORIES.map(c=>`
     <tr><td>${c}</td><td class="num">${totals[c]?('¥'+totals[c].toLocaleString()):'—'}</td></tr>
   `).join('') + `<tr class="total"><td>計</td><td class="num">¥${grandTotal.toLocaleString()}</td></tr>`;
 
-  updatePnl(grandTotal, yearExpenses.length>0);
+  const feeNote = document.getElementById('autoFeeNote');
+  if(feeNote){
+    feeNote.textContent = autoFee>0
+      ? `うちSquare決済手数料(自動計上・雑費に含む)：¥${autoFee.toLocaleString()} — 入金のときに1回だけ自動計上しています。別途ご自身で手数料の経費を追加入力しないでください(二重計上の原因になります)。`
+      : '';
+  }
+
+  updatePnl(grandTotal, yearExpenses.length>0 || autoFee>0);
 }
 
 function updatePnl(expenseTotal, hasExpenses){
@@ -806,6 +826,7 @@ document.getElementById('downloadExpenseCsvBtn').addEventListener('click', ()=>{
   EXPENSE_CATEGORIES.forEach(c=> totals[c]=0 );
   expenseEntries.filter(e=>e.date.slice(0,4)===year).forEach(e=>{ totals[e.category] = (totals[e.category]||0) + e.amount; });
   totals['減価償却費'] = (totals['減価償却費']||0) + getDepreciationTotal(year);
+  totals['雑費'] = (totals['雑費']||0) + getAutoSquareFee(year);
   const lines = ['科目,金額'];
   EXPENSE_CATEGORIES.forEach(c=> lines.push(`${c},${totals[c]}`));
   const grand = Object.values(totals).reduce((a,b)=>a+b,0);
@@ -1085,16 +1106,6 @@ function getAllYearsSorted(){
   ])).sort();
 }
 
-function computeYearPL(year){
-  const squareSales = allTransactions.filter(t=>t.year===year && !t.refund).reduce((s,t)=>s+t.total,0);
-  const manualSalesTotal = manualSales.filter(s=>s.year===year).reduce((s,x)=>s+x.total,0);
-  const sales = squareSales + manualSalesTotal;
-  const yearExpenses = expenseEntries.filter(e=>e.date.slice(0,4)===year).reduce((s,e)=>s+e.amount,0);
-  const dep = getDepreciationTotal(year);
-  const expenses = yearExpenses + dep;
-  return {sales, expenses, netIncome: sales-expenses};
-}
-
 function getReconcileGroupsAll(){
   const groups = {};
   allTransactions.filter(t=>!t.refund).forEach(t=>{
@@ -1106,8 +1117,34 @@ function getReconcileGroupsAll(){
   return Object.values(groups);
 }
 
-function computeBalanceSheet(uptoYear){
-  const years = getAllYearsSorted().filter(y=> y<=uptoYear);
+// Square決済手数料は「入金のときに1回だけ」自動計上する(二重控除を防ぐため、手入力は不要・非推奨)
+function getAutoSquareFee(year){
+  return getReconcileGroupsAll()
+    .filter(g=> g.depositDate && g.depositDate.slice(0,4)===year)
+    .reduce((s,g)=> s+g.fee, 0);
+}
+
+function computeYearPL(year, cutoffDate){
+  const cutoff = cutoffDate || (year+'-12-31');
+  const inY = (d)=> d.slice(0,4)===year && d<=cutoff;
+  const squareSales = allTransactions.filter(t=> t.year===year && !t.refund && t.date<=cutoff).reduce((s,t)=>s+t.total,0);
+  const manualSalesTotal = manualSales.filter(s=> inY(s.date)).reduce((s,x)=>s+x.total,0);
+  const sales = squareSales + manualSalesTotal;
+  const yearExpenses = expenseEntries.filter(e=> inY(e.date)).reduce((s,e)=>s+e.amount,0);
+  const dep = getDepreciationTotal(year); // 減価償却費は年単位の計算のため、期中按分はしない簡易仕様
+  const autoFee = getReconcileGroupsAll().filter(g=> g.depositDate && inY(g.depositDate)).reduce((s,g)=>s+g.fee,0);
+  const expenses = yearExpenses + dep + autoFee;
+  return {sales, expenses, netIncome: sales-expenses, autoFee};
+}
+
+function getAutoSquareFee(year){
+  return computeYearPL(year).autoFee;
+}
+
+function computeBalanceSheet(uptoYear, cutoffDateArg){
+  const cutoffDate = cutoffDateArg || (uptoYear+'-12-31');
+  const cutoffYear = cutoffDate.slice(0,4);
+  const years = getAllYearsSorted().filter(y=> y<=cutoffYear);
   let capital = parseInt(document.getElementById('openingCapital').value||'0',10);
   let cash = parseInt(document.getElementById('openingCash').value||'0',10);
   let bank = parseInt(document.getElementById('openingBank').value||'0',10);
@@ -1115,34 +1152,36 @@ function computeBalanceSheet(uptoYear){
   let cc = parseInt(document.getElementById('openingCC').value||'0',10);
   const ownerDrawInput = parseInt(document.getElementById('ownerDraw').value||'0',10);
   const reconcileGroups = getReconcileGroupsAll();
-  const uptoNum = parseInt(uptoYear,10);
 
   years.forEach(y=>{
-    const squareSalesY = allTransactions.filter(t=>t.year===y && !t.refund).reduce((s,t)=>s+t.total,0);
+    const yCutoff = (y===cutoffYear) ? cutoffDate : (y+'-12-31');
+    const inY = (d)=> d.slice(0,4)===y && d<=yCutoff;
+
+    const squareSalesY = allTransactions.filter(t=> t.year===y && !t.refund && t.date<=yCutoff).reduce((s,t)=>s+t.total,0);
     ar += squareSalesY;
 
     reconcileGroups.forEach(g=>{
-      if(g.depositDate && g.depositDate.slice(0,4)===y){
-        bank += g.sales;
-        ar -= g.sales;
+      if(g.depositDate && inY(g.depositDate)){
+        bank += (g.sales - g.fee); // 入金額(手数料差引後)。手数料はcomputeYearPL側で自動的に経費計上される
+        ar -= g.sales; // 売掛金は売上総額で消す(正しい仕訳ルール)
       }
     });
 
-    manualSales.filter(s=>s.year===y).forEach(s=>{
+    manualSales.filter(s=> inY(s.date)).forEach(s=>{
       const pm = s.payMethod||'現金';
       if(pm==='現金') cash += s.total;
       else if(pm==='普通預金') bank += s.total;
       else ar += s.total;
     });
 
-    expenseEntries.filter(e=>e.date.slice(0,4)===y).forEach(e=>{
+    expenseEntries.filter(e=> inY(e.date)).forEach(e=>{
       const pm = e.payMethod||'現金';
       if(pm==='現金') cash -= e.amount;
       else if(pm==='普通預金') bank -= e.amount;
       else if(pm==='クレジットカード') cc += e.amount;
     });
 
-    const ccSettlementsY = ccSettlements.filter(c=>c.date.slice(0,4)===y);
+    const ccSettlementsY = ccSettlements.filter(c=> inY(c.date));
     let ccPersonalY = 0;
     ccSettlementsY.forEach(c=>{
       bank -= c.total;
@@ -1150,18 +1189,19 @@ function computeBalanceSheet(uptoYear){
       ccPersonalY += c.personal;
     });
 
-    const ownerLoan = expenseEntries.filter(e=>e.date.slice(0,4)===y && (e.payMethod||'現金')==='事業主借').reduce((s,e)=>s+e.amount,0);
-    const ownerDraw = ccPersonalY + ((y===uptoYear) ? ownerDrawInput : 0);
-    const pl = computeYearPL(y);
+    const ownerLoan = expenseEntries.filter(e=> inY(e.date) && (e.payMethod||'現金')==='事業主借').reduce((s,e)=>s+e.amount,0);
+    const ownerDraw = ccPersonalY + ((y===cutoffYear) ? ownerDrawInput : 0);
+    const pl = computeYearPL(y, yCutoff);
     capital = capital + ownerLoan - ownerDraw + pl.netIncome;
   });
 
+  const cutoffNum = parseInt(cutoffYear,10);
   const assetAcc = {};
   assetEntries.forEach(a=>{
     const ay = parseInt(a.acqMonth.split('-')[0],10);
-    if(ay<=uptoNum){
+    if(ay<=cutoffNum){
       let accDep = 0;
-      for(let yy=ay; yy<=uptoNum; yy++){ accDep += calcDepreciation({...a, targetYear:yy}); }
+      for(let yy=ay; yy<=cutoffNum; yy++){ accDep += calcDepreciation({...a, targetYear:yy}); }
       assetAcc[a.id] = {cost:a.cost, accDep};
     }
   });
@@ -1204,6 +1244,26 @@ function renderBalanceSheet(){
 }
 
 document.getElementById('recalcBsBtn').addEventListener('click', ()=>{ renderBalanceSheet(); renderLossCarryforward(); });
+
+document.getElementById('checkBankBtn').addEventListener('click', ()=>{
+  const date = document.getElementById('reconcileDate').value;
+  const actualStr = document.getElementById('actualBankBalance').value;
+  const msgEl = document.getElementById('bankCheckMsg');
+  if(!date){ showError('照合する日付を入力してください。'); return; }
+  if(actualStr===''){ showError('通帳の実際の残高を入力してください。'); return; }
+  clearError();
+  const actual = parseInt(actualStr,10);
+  const year = date.slice(0,4);
+  const bs = computeBalanceSheet(year, date);
+  const diff = bs.bank - actual;
+  if(diff===0){
+    msgEl.className = 'msg ok';
+    msgEl.textContent = `✓ ${date}時点の帳簿残高(¥${bs.bank.toLocaleString()})と通帳残高が一致しています。`;
+  } else {
+    msgEl.className = 'msg warn';
+    msgEl.textContent = `⚠ ズレがあります。帳簿上の残高：¥${bs.bank.toLocaleString()} / 通帳の実際残高：¥${actual.toLocaleString()} / 差額：¥${diff.toLocaleString()}。入金・支払方法の入力漏れや、手数料の二重計上がないか確認してください。`;
+  }
+});
 
 document.getElementById('downloadBsBtn').addEventListener('click', ()=>{
   const bs = window.__lastBS;
