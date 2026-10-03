@@ -170,6 +170,13 @@
       </select></label>
       <label style="grid-column:1/-1;">摘要(メモ)<input type="text" id="expMemo" placeholder="例：ジェルカラー仕入"></label>
     </div>
+
+    <label class="field" style="display:block;margin:4px 0 14px;">
+      <span style="display:block;font-size:12.5px;color:var(--ink-soft);margin-bottom:5px;">領収書を添付(画像・PDF、任意)</span>
+      <input type="file" id="expReceiptInput" accept="image/*,.pdf">
+    </label>
+    <div id="expReceiptPreview" class="note hidden" style="margin-bottom:14px;"></div>
+
     <button class="btn" id="addExpenseBtn">この内容を追加</button>
     <button class="btn secondary hidden" id="cancelExpenseEditBtn" style="margin-top:8px;">編集をキャンセル</button>
 
@@ -671,9 +678,58 @@ function syncYearOptions(){
 
 // ---- 経費(仕訳) ----
 const EXPENSE_CATEGORIES = ['租税公課','荷造運賃','水道光熱費','旅費交通費','通信費','広告宣伝費','接待交際費','損害保険料','修繕費','消耗品費','減価償却費','福利厚生費','給料賃金','外注工賃','利子割引料','地代家賃','貸倒金','雑費'];
-let expenseEntries = []; // {id, date, category, amount, memo}
+let expenseEntries = []; // {id, date, category, amount, memo, payMethod, receipt:{name,type,data}}
 let expIdCounter = 1;
 let editingExpenseId = null;
+let pendingReceipt = null; // {name, type, data(base64 dataURL)}
+
+function resizeImageFile(file){
+  return new Promise((resolve)=>{
+    const reader = new FileReader();
+    reader.onload = (e)=>{
+      const img = new Image();
+      img.onload = ()=>{
+        const maxW = 1000;
+        const scale = Math.min(1, maxW/img.width);
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width*scale;
+        canvas.height = img.height*scale;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img,0,0,canvas.width,canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', 0.75));
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+function readFileAsDataURL(file){
+  return new Promise((resolve)=>{
+    const reader = new FileReader();
+    reader.onload = (e)=> resolve(e.target.result);
+    reader.readAsDataURL(file);
+  });
+}
+function renderReceiptPreview(){
+  const box = document.getElementById('expReceiptPreview');
+  if(!pendingReceipt){ box.classList.add('hidden'); box.innerHTML=''; return; }
+  box.classList.remove('hidden');
+  box.innerHTML = `📎 ${pendingReceipt.name} を添付中 <button type="button" id="removeReceiptBtn" class="delBtn" style="margin-left:8px;">削除</button>`;
+  document.getElementById('removeReceiptBtn').addEventListener('click', ()=>{
+    pendingReceipt = null;
+    document.getElementById('expReceiptInput').value='';
+    renderReceiptPreview();
+  });
+}
+document.getElementById('expReceiptInput').addEventListener('change', async (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  let data;
+  if(file.type.startsWith('image/')) data = await resizeImageFile(file);
+  else data = await readFileAsDataURL(file);
+  pendingReceipt = {name:file.name, type:file.type, data};
+  renderReceiptPreview();
+});
 
 const expCategorySelect = document.getElementById('expCategory');
 expCategorySelect.innerHTML = EXPENSE_CATEGORIES.map(c=>`<option value="${c}">${c}</option>`).join('');
@@ -690,14 +746,18 @@ document.getElementById('addExpenseBtn').addEventListener('click', ()=>{
   if(editingExpenseId){
     const ex = expenseEntries.find(e=>e.id===editingExpenseId);
     ex.date=date; ex.category=category; ex.amount=amount; ex.memo=memo; ex.payMethod=payMethod;
+    ex.receipt = pendingReceipt;
     exitExpenseEdit();
   } else {
-    expenseEntries.push({id:expIdCounter++, date, category, amount, memo, payMethod});
+    expenseEntries.push({id:expIdCounter++, date, category, amount, memo, payMethod, receipt:pendingReceipt});
   }
   document.getElementById('expDate').value='';
   document.getElementById('expAmount').value='';
   document.getElementById('expMemo').value='';
   document.getElementById('expPayMethod').value='現金';
+  document.getElementById('expReceiptInput').value='';
+  pendingReceipt = null;
+  renderReceiptPreview();
   syncYearOptions();
   renderExpenses();
 });
@@ -710,6 +770,9 @@ function exitExpenseEdit(){
   document.getElementById('expAmount').value='';
   document.getElementById('expMemo').value='';
   document.getElementById('expPayMethod').value='現金';
+  document.getElementById('expReceiptInput').value='';
+  pendingReceipt = null;
+  renderReceiptPreview();
 }
 document.getElementById('cancelExpenseEditBtn').addEventListener('click', exitExpenseEdit);
 
@@ -726,7 +789,7 @@ function renderExpenses(){
       <td>${e.date}</td>
       <td>${e.category}</td>
       <td class="num">¥${e.amount.toLocaleString()}</td>
-      <td>${e.memo||''}${e.payMethod?` <span style="color:var(--ink-soft);font-size:11px;">(${e.payMethod})</span>`:''}</td>
+      <td>${e.memo||''}${e.payMethod?` <span style="color:var(--ink-soft);font-size:11px;">(${e.payMethod})</span>`:''}${e.receipt?` <a href="${e.receipt.data}" download="${e.receipt.name}" style="color:var(--accent-ink);">📎領収書</a>`:''}</td>
       <td><button class="delBtn" data-eedit="${e.id}">編集</button> <button class="delBtn" data-id="${e.id}">削除</button></td>
     </tr>
   `).join('');
@@ -749,6 +812,8 @@ function renderExpenses(){
       document.getElementById('expAmount').value = e.amount;
       document.getElementById('expMemo').value = e.memo||'';
       document.getElementById('expPayMethod').value = e.payMethod||'現金';
+      pendingReceipt = e.receipt || null;
+      renderReceiptPreview();
       document.getElementById('addExpenseBtn').textContent = 'この内容で更新';
       document.getElementById('cancelExpenseEditBtn').classList.remove('hidden');
       document.getElementById('expDate').scrollIntoView({behavior:'smooth', block:'center'});
