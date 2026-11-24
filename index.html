@@ -467,7 +467,7 @@
   <div id="errorArea"></div>
 
   <footer>
-    <div id="appVersion" style="margin-bottom:8px;">バージョン 2026.11.25b</div>
+    <div id="appVersion" style="margin-bottom:8px;">バージョン 2026.11.25c</div>
     集計結果は必ずご自身でも見直してから決算書に転記してください。税額の最終判断は税務署・税理士にご確認ください。
     <br><br>
     本ツールはSquare、弥生株式会社、国税庁のいずれとも無関係の非公式ツールです。税務相談・申告代行を行うものではなく、確定申告の集計を補助するための計算ツールです。
@@ -1683,9 +1683,11 @@ function suggestCategory(shop){
   for(const [re, cat] of SHOP_HINTS){ if(re.test(key)) return cat; }
   return '';
 }
+let shopNames = {}; // {正規化した店名: 表示用の店名}(レシート読み取りで店名を見つけるため)
 function learnShop(shop, choice){
   const key = normShop(shop);
   if(key && (choice===PERSONAL || EXPENSE_CATEGORIES.includes(choice))) shopRules[key] = choice;
+  if(key && key.length>=3 && !/^(カード|PAYPAL)/.test(key)) shopNames[key] = String(shop).trim().slice(0,30);
 }
 
 // ==================== レシート写真の読み取り ====================
@@ -1939,29 +1941,60 @@ function parseReceiptText(raw){
     while(toks.length && junk(toks[0])) toks.shift();
     while(toks.length && junk(toks[toks.length-1]) && !/[\u3040-\u30ff\u4e00-\u9fff]/.test(toks[toks.length-1])) toks.pop();
     const t = toks.join(' ');
-    if(t.length<2 || /領収|レシート|RECEIPT|TEL|電話|〒|HTTP|WWW|\d{2,4}[-\/年]\d|ありがとう|いらっしゃい|登録番号|^T\d|注文|但し|として|上記|領収|いたしました|様$|担当|売上|送料|小計|合計|消費税|預り|釣/.test(t.toUpperCase()) || (/[市町村区]|丁目|番地/.test(t) && /\d/.test(t)) || /[¥￥\\]|\d[\d,.]+|\d点/.test(t)) continue;
+    if(t.length<2 || /領収|レシート|RECEIPT|TEL|電話|〒|HTTP|WWW|\d{2,4}[-\/年]\d|ありがとう|いらっしゃい|登録番号|^T\d|注文|但し|として|上記|領収|いたしました|様$|担当|売上|送料|小計|合計|消費税|預り|釣|請求|金額|お買上|支払|現金|クレジット|カード/.test(t.toUpperCase()) || (/[市町村区]|丁目|番地/.test(t) && /\d/.test(t)) || /[¥￥\\]|\d[\d,.]+|\d点/.test(t)) continue;
     const clean = t.replace(/([^\x00-\x7F])\s+(?=[^\x00-\x7F])/g,'$1');
     const jp = (clean.match(/[\u3040-\u30ff\u4e00-\u9fff]/g)||[]).length;
     const up = (clean.match(/[A-Z]/g)||[]).length;
     const good = (clean.match(/[A-Za-z\u3040-\u30ff\u4e00-\u9fff]/g)||[]).length;
-    if((jp < 2 && up < 3) || good/clean.replace(/\s/g,'').length < 0.6) continue; // 記号だらけの行は店名にしない
+    if(clean.replace(/\s/g,'').length < 3 || (jp < 2 && up < 3) || good/clean.replace(/\s/g,'').length < 0.6) continue; // 記号だらけの行は店名にしない
     shopCands.push(clean.slice(0,30));
   }
   // 「〇〇店」で終わる行があれば、それを一番の候補にする(領収証は店名が下にあることが多い)
   const stores = lines.map(l=> l.replace(/\s+/g,' ').trim().replace(/([^\x00-\x7F])\s+(?=[^\x00-\x7F])/g,'$1'))
     .map(l=> l.replace(/(店)[^店]{0,2}$/,'$1')).filter(l=> /^[^\d¥￥\\]{2,20}店$/.test(l) && (l.match(/[぀-ヿ一-鿿]/g)||[]).length>=3);
   shopCands.unshift(...stores.filter(x=>!shopCands.includes(x)));
+  // よく行くお店(チェーン店・前に記帳したお店)の名前が写っていれば、それを店名にする(一番確実)
+  const known = findKnownShop(lines);
+  if(known) return {date, total, totalByKey, shop: known, shopCands, shopFromDict: true};
   const shop = shopCands[0] || '';
   return {date, total, totalByKey, shop, shopCands};
 }
 // 店名は、読み取りの自信が高い行だけ使う(意味不明な店名を入れない)
+const KNOWN_SHOPS = [
+  ['ダイソー', /ダイソー|DAISO|D.ISO|ダイン-|ダイゾー/], ['セリア', /セリア|SERIA/], ['キャンドゥ', /キャンドゥ|CANDO|CAN.DO/], ['ワッツ', /ワッツ|WATTS/],
+  ['ニトリ', /ニトリ|NITORI/], ['無印良品', /無印良品|MUJI/], ['ロフト', /ロフト|LOFT/], ['ハンズ', /ハンズ|HANDS/],
+  ['ドン・キホーテ', /ドン.?キホーテ|DONQUIJOTE|ドンキ/], ['ツルハドラッグ', /ツルハ/], ['マツモトキヨシ', /マツモトキヨシ|マツキヨ/],
+  ['ウエルシア', /ウエルシア|WELCIA/], ['ドラッグストアコスモス', /ドラッグストアコスモス|ドラッグコスモス/], ['サンドラッグ', /サンドラッグ/],
+  ['スギ薬局', /スギ薬局/], ['ダイレックス', /ダイレックス|DIREX/], ['イオン', /イオン|AEON/], ['マックスバリュ', /マックスバリュ|MAXVALU/],
+  ['ゆめタウン', /ゆめタウン|ゆめマート/], ['セブン-イレブン', /セブン.?イレブン|7-ELEVEN|SEVEN.?ELEVEN/], ['ローソン', /ローソン|LAWSON/],
+  ['ファミリーマート', /ファミリーマート|FAMILYMART/], ['ENEOS', /ENEOS|エネオス/], ['出光', /出光|IDEMITSU|APOLLO/], ['郵便局', /郵便局|日本郵便/],
+  ['カインズ', /カインズ|CAINZ/], ['コメリ', /コメリ/], ['ナフコ', /ナフコ/], ['エディオン', /エディオン|EDION/], ['ベスト電器', /ベスト電器/],
+  ['ヨドバシカメラ', /ヨドバシ/], ['ビックカメラ', /ビックカメラ/], ['ユニクロ', /ユニクロ|UNIQLO/], ['しまむら', /しまむら/],
+  ['ビューティーガレージ', /ビューティーガレージ|BEAUTYGARAGE/], ['ネイルタウン', /ネイルタウン|NAILTOWN/], ['ネイル工房', /ネイル工房/]
+];
+function findKnownShop(lines){
+  const flatAll = lines.map(l=>z2h(l).replace(/\s+/g,'')).join('\n').toUpperCase();
+  // 前に記帳したことのあるお店(3文字以上)を優先
+  if(typeof shopRules==='object' && typeof shopNames==='object'){
+    const hit = Object.keys(shopNames).filter(k=>k.length>=3 && flatAll.includes(k)).sort((a,b)=>b.length-a.length)[0];
+    if(hit) return shopNames[hit];
+  }
+  for(const [name, re] of KNOWN_SHOPS){
+    if(re.test(flatAll)){
+      // 「ダイソー相浦店」のように支店名まで読めていれば、それを使う
+      const branch = lines.map(l=>z2h(l).replace(/\s+/g,'')).find(l=> re.test(l.toUpperCase()) && /店/.test(l) && l.length<=20);
+      return branch ? branch.replace(/(店)[^店]*$/,'$1') : name;
+    }
+  }
+  return '';
+}
 function shopFromData(data, cands){
   if(!cands || !cands.length) return '';
   if(!data || !Array.isArray(data.lines)) return cands[0];
   for(const c of cands){
     const key = c.replace(/\s/g,'').slice(0,4);
     const line = data.lines.find(l=> z2h(l.text||'').replace(/\s/g,'').includes(key));
-    if(!line || typeof line.confidence!=='number' || line.confidence >= 65) return c;
+    if(!line || typeof line.confidence!=='number' || line.confidence >= 75) return c;
   }
   return '';
 }
@@ -1978,7 +2011,7 @@ async function readReceipt(file, onProgress){
       if(onProgress) onProgress('recognizing', (k*2+i)/(rots.length*2));
       const { data } = await worker.recognize(variants[i]);
       const r = parseReceiptText(data && data.text);
-      r.shop = shopFromData(data, r.shopCands);
+      if(!r.shopFromDict) r.shop = shopFromData(data, r.shopCands);
       r.score = receiptScore(r, data && data.confidence);
       r.text = (data&&data.text)||''; r.conf = (data&&data.confidence)||0;
       results.push(r);
@@ -2300,7 +2333,7 @@ let saveTimer = null, restoring = false;
 function snapshot(){
   const opening = {};
   ['openingCapital','openingCash','openingBank','openingAR','openingCC'].forEach(id=> opening[id] = toInt(document.getElementById(id).value));
-  return {version:2, savedAt:new Date().toISOString(), transactions:allTransactions, manualSales, expenses:expenseEntries, assets:assetEntries, cc:ccSettlements, ownerDrawByYear, opening, shopRules, ccImportedKeys};
+  return {version:2, savedAt:new Date().toISOString(), transactions:allTransactions, manualSales, expenses:expenseEntries, assets:assetEntries, cc:ccSettlements, ownerDrawByYear, opening, shopRules, shopNames, ccImportedKeys};
 }
 function setSaveStatus(text, warn){
   const el = document.getElementById('autosaveStatus');
@@ -2336,6 +2369,10 @@ function applySnapshot(data){
       Object.keys(data.ownerDrawByYear).forEach(y=>{ if(/^\d{4}$/.test(y)){ const v=data.ownerDrawByYear[y]||{}; ownerDrawByYear[y]={cash:toInt(v.cash), bank:toInt(v.bank)}; } });
     }
     ccImportedKeys = Array.isArray(data.ccImportedKeys) ? data.ccImportedKeys.filter(k=>typeof k==='string' && k.length<200) : [];
+    shopNames = {};
+    if(data.shopNames && typeof data.shopNames==='object'){
+      Object.keys(data.shopNames).forEach(k=>{ const v=data.shopNames[k]; if(typeof k==='string' && k.length<=40 && typeof v==='string') shopNames[k]=v.slice(0,30); });
+    }
     shopRules = {};
     if(data.shopRules && typeof data.shopRules==='object'){
       Object.keys(data.shopRules).forEach(k=>{ const v=data.shopRules[k]; if(typeof k==='string' && k.length<=80 && (v===PERSONAL || EXPENSE_CATEGORIES.includes(v))) shopRules[k]=v; });
