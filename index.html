@@ -1709,34 +1709,6 @@ function getOcrWorker(onProgress){
   }
   return ocrWorkerPromise;
 }
-// 読み取りやすいように、白黒にして大きさをそろえる
-function prepareReceiptImage(file){
-  return new Promise((resolve, reject)=>{
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = ()=>{
-      const maxW = 1600, minW = 1000;
-      let scale = 1;
-      if(img.width > maxW) scale = maxW/img.width;
-      else if(img.width < minW) scale = Math.min(2, minW/img.width);
-      const c = document.createElement('canvas');
-      c.width = Math.round(img.width*scale); c.height = Math.round(img.height*scale);
-      const ctx = c.getContext('2d');
-      ctx.drawImage(img, 0, 0, c.width, c.height);
-      const d = ctx.getImageData(0,0,c.width,c.height); const px = d.data;
-      for(let i=0;i<px.length;i+=4){
-        const g = 0.299*px[i]+0.587*px[i+1]+0.114*px[i+2];
-        const v = g > 165 ? 255 : (g < 95 ? 0 : Math.round((g-95)*255/70));
-        px[i]=px[i+1]=px[i+2]=v;
-      }
-      ctx.putImageData(d,0,0);
-      URL.revokeObjectURL(url);
-      resolve(c);
-    };
-    img.onerror = ()=>{ URL.revokeObjectURL(url); reject(new Error('image')); };
-    img.src = url;
-  });
-}
 function z2h(t){ return String(t||'').normalize('NFKC'); }
 function pad2(n){ return String(n).padStart(2,'0'); }
 function validYmd(y,m,d){
@@ -1744,88 +1716,318 @@ function validYmd(y,m,d){
   if(!(y>=2000 && y<=2100 && m>=1 && m<=12 && d>=1 && d<=31)) return '';
   return `${y}-${pad2(m)}-${pad2(d)}`;
 }
+// ==== レシート読み取り(改良版) ====
+function loadImageFile(file){
+  return new Promise((resolve, reject)=>{
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = ()=>{ URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = ()=>{ URL.revokeObjectURL(url); reject(new Error('image')); };
+    img.src = url;
+  });
+}
+function grayOf(ctx, w, h){
+  const d = ctx.getImageData(0,0,w,h).data;
+  const g = new Uint8ClampedArray(w*h);
+  for(let i=0,j=0;i<d.length;i+=4,j++) g[j] = (d[i]*299 + d[i+1]*587 + d[i+2]*114)/1000;
+  return g;
+}
+function otsu(g){
+  const hist = new Array(256).fill(0); g.forEach(v=>hist[v]++);
+  const total = g.length; let sum = 0; for(let i=0;i<256;i++) sum += i*hist[i];
+  let sumB=0, wB=0, best=0, th=128;
+  for(let t=0;t<256;t++){
+    wB += hist[t]; if(!wB) continue;
+    const wF = total - wB; if(!wF) break;
+    sumB += t*hist[t];
+    const mB = sumB/wB, mF = (sum-sumB)/wF;
+    const v = wB*wF*(mB-mF)*(mB-mF);
+    if(v>best){ best=v; th=t; }
+  }
+  return th;
+}
+// 写真の中の「白い紙(レシート)」の範囲を探して切り出す
+function findPaperBox(img){
+  const sw = 320, sh = Math.max(1, Math.round(img.height*sw/img.width));
+  const c = document.createElement('canvas'); c.width=sw; c.height=sh;
+  const ctx = c.getContext('2d'); ctx.drawImage(img,0,0,sw,sh);
+  const g = grayOf(ctx, sw, sh);
+  const th = otsu(g);
+  const bright = new Uint8Array(sw*sh);
+  for(let i=0;i<g.length;i++) bright[i] = g[i] > th ? 1 : 0;
+  // 一番大きい明るいかたまりを探す
+  const label = new Int32Array(sw*sh); let best = {n:0}, cur = 0;
+  const stack = [];
+  for(let s=0;s<bright.length;s++){
+    if(!bright[s] || label[s]) continue;
+    cur++; let n=0, x0=sw, y0=sh, x1=0, y1=0;
+    stack.push(s); label[s]=cur;
+    while(stack.length){
+      const p = stack.pop(); n++;
+      const x = p%sw, y = (p/sw)|0;
+      if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y;
+      const nb = [p-1,p+1,p-sw,p+sw];
+      for(const q of nb){
+        if(q<0||q>=bright.length) continue;
+        if((q===p-1 && x===0) || (q===p+1 && x===sw-1)) continue;
+        if(bright[q] && !label[q]){ label[q]=cur; stack.push(q); }
+      }
+    }
+    if(n>best.n) best = {n,x0,y0,x1,y1};
+  }
+  if(!best.n) return null;
+  const area = (best.x1-best.x0+1)*(best.y1-best.y0+1);
+  // 紙が写真の大部分を占める・または小さすぎるときは切り出さない
+  if(area > sw*sh*0.85 || area < sw*sh*0.02) return null;
+  const k = img.width/sw, m = 6;
+  return {x:Math.max(0,(best.x0-m)*k), y:Math.max(0,(best.y0-m)*k),
+          w:Math.min(img.width,(best.x1-best.x0+1+2*m)*k), h:Math.min(img.height,(best.y1-best.y0+1+2*m)*k)};
+}
+// 読み取り用の画像を2種類つくる(白黒くっきり版/濃淡そのまま版)
+async function prepareReceiptVariants(file){
+  const img = await loadImageFile(file);
+  const box = findPaperBox(img) || {x:0,y:0,w:img.width,h:img.height};
+  // 文字が小さすぎないよう、紙の幅を1500px前後にそろえる(拡大は最大3倍)
+  const target = 1500;
+  let scale = target/box.w; scale = Math.min(3, Math.max(0.3, scale));
+  let W = Math.round(box.w*scale), H = Math.round(box.h*scale);
+  const maxPx = 9000000; // iPhoneのSafariのキャンバス上限より十分小さく
+  if(W*H > maxPx){ const r = Math.sqrt(maxPx/(W*H)); W=Math.round(W*r); H=Math.round(H*r); }
+  const crop = document.createElement('canvas'); crop.width=W; crop.height=H;
+  const cctx = crop.getContext('2d');
+  cctx.imageSmoothingQuality = 'high';
+  cctx.drawImage(img, box.x, box.y, box.w, box.h, 0, 0, W, H);
+  // 斜めに撮ったレシートをまっすぐに直す
+  const ang = estimateSkew(crop);
+  let base = crop;
+  if(Math.abs(ang) >= 0.8){
+    const rad = ang*Math.PI/180, cs = Math.abs(Math.cos(rad)), sn = Math.abs(Math.sin(rad));
+    const W2 = Math.round(W*cs + H*sn), H2 = Math.round(W*sn + H*cs);
+    base = document.createElement('canvas'); base.width=W2; base.height=H2;
+    const rctx = base.getContext('2d');
+    rctx.fillStyle = '#fff'; rctx.fillRect(0,0,W2,H2);
+    rctx.translate(W2/2,H2/2); rctx.rotate(rad); rctx.drawImage(crop,-W/2,-H/2);
+    W = W2; H = H2;
+  }
+  const bctx = base.getContext('2d');
+  const g = grayOf(bctx, W, H);
+  // 濃淡版:明るさの幅を広げる
+  const sorted = Array.from(g.filter((_,i)=>i%7===0)).sort((a,b)=>a-b);
+  const lo = sorted[Math.floor(sorted.length*0.02)]||0, hi = sorted[Math.floor(sorted.length*0.98)]||255;
+  const span = Math.max(1, hi-lo);
+  const grayC = document.createElement('canvas'); grayC.width=W; grayC.height=H;
+  const gctx = grayC.getContext('2d'); const gd = gctx.createImageData(W,H);
+  for(let i=0,j=0;j<g.length;i+=4,j++){ const v = Math.max(0,Math.min(255,(g[j]-lo)*255/span)); gd.data[i]=gd.data[i+1]=gd.data[i+2]=v; gd.data[i+3]=255; }
+  gctx.putImageData(gd,0,0);
+  // 白黒版:場所ごとの明るさに合わせて白黒にする(影・ムラに強い)
+  const ii = new Float64Array((W+1)*(H+1));
+  for(let y=1;y<=H;y++){ let row=0; for(let x=1;x<=W;x++){ row += g[(y-1)*W+(x-1)]; ii[y*(W+1)+x] = ii[(y-1)*(W+1)+x] + row; } }
+  const r = Math.max(8, Math.round(W/28)), t = 0.13;
+  const binC = document.createElement('canvas'); binC.width=W; binC.height=H;
+  const bctx2 = binC.getContext('2d'); const bd = bctx2.createImageData(W,H);
+  for(let y=0;y<H;y++){
+    const y0 = Math.max(0,y-r), y1 = Math.min(H-1,y+r);
+    for(let x=0;x<W;x++){
+      const x0 = Math.max(0,x-r), x1 = Math.min(W-1,x+r);
+      const cnt = (x1-x0+1)*(y1-y0+1);
+      const s = ii[(y1+1)*(W+1)+(x1+1)] - ii[y0*(W+1)+(x1+1)] - ii[(y1+1)*(W+1)+x0] + ii[y0*(W+1)+x0];
+      const v = g[y*W+x]*cnt <= s*(1-t) ? 0 : 255;
+      const k = (y*W+x)*4; bd.data[k]=bd.data[k+1]=bd.data[k+2]=v; bd.data[k+3]=255;
+    }
+  }
+  bctx2.putImageData(bd,0,0);
+  return [binC, grayC];
+}
+// 文字の行が一番そろう角度を探す(-12〜12度)
+function estimateSkew(canvas){
+  const sw = 400, sh = Math.max(1, Math.round(canvas.height*sw/canvas.width));
+  const c = document.createElement('canvas'); c.width=sw; c.height=sh;
+  const ctx = c.getContext('2d'); ctx.drawImage(canvas,0,0,sw,sh);
+  const g = grayOf(ctx, sw, sh); const th = otsu(g);
+  // 紙の上にある「周りより暗い点」=文字だけを使う(背景や影は使わない)
+  const ii = new Float64Array((sw+1)*(sh+1));
+  for(let y=1;y<=sh;y++){ let row=0; for(let x=1;x<=sw;x++){ row += g[(y-1)*sw+(x-1)]; ii[y*(sw+1)+x] = ii[(y-1)*(sw+1)+x] + row; } }
+  const R = 8, pts = [];
+  for(let y=0;y<sh;y++){
+    const y0=Math.max(0,y-R), y1=Math.min(sh-1,y+R);
+    for(let x=0;x<sw;x++){
+      const x0=Math.max(0,x-R), x1=Math.min(sw-1,x+R);
+      const mean = (ii[(y1+1)*(sw+1)+(x1+1)] - ii[y0*(sw+1)+(x1+1)] - ii[(y1+1)*(sw+1)+x0] + ii[y0*(sw+1)+x0]) / ((x1-x0+1)*(y1-y0+1));
+      if(mean > th && g[y*sw+x] < mean*0.88) pts.push(x - sw/2, y - sh/2);
+    }
+  }
+  if(pts.length < 50) return 0;
+  let bestA = 0, bestV = -1;
+  for(let a=-12; a<=12; a+=1){
+    const rad = a*Math.PI/180, cs = Math.cos(rad), sn = Math.sin(rad);
+    const bins = new Float64Array(sh*2+10);
+    for(let i=0;i<pts.length;i+=2){ const yy = Math.round(pts[i]*sn + pts[i+1]*cs + sh); if(yy>=0 && yy<bins.length) bins[yy]++; }
+    let m=0; for(const b of bins) m+=b; m/=bins.length;
+    let v=0; for(const b of bins) v+=(b-m)*(b-m);
+    if(v>bestV){ bestV=v; bestA=a; }
+  }
+  return bestA;
+}
+function receiptScore(r, conf){
+  return (r.total?3:0) + (r.date?2:0) + (r.shop?1:0) + (r.totalByKey?2:0) + (conf||0)/50;
+}
 // レシートの文字から、日付・合計金額・お店の名前を探す
 function parseReceiptText(raw){
   const lines = z2h(raw).split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
-  const flat = lines.map(l=>l.replace(/\s+/g,''));
+  const flat = lines.map(l=>l.replace(/\s+/g,'').replace(/[O〇]/g,'0').replace(/(?<=\d)[lI|](?=\d)/g,'1'));
   const all = flat.join('\n');
-  // 日付
-  let date = '';
-  let m = all.match(/(20\d{2})[年\/\.\-](\d{1,2})[月\/\.\-](\d{1,2})/);
-  if(m) date = validYmd(m[1],m[2],m[3]);
-  if(!date){ m = all.match(/(?:令和|R)(\d{1,2})[年\/\.\-](\d{1,2})[月\/\.\-](\d{1,2})/); if(m) date = validYmd(2018+(+m[1]),m[2],m[3]); }
-  if(!date){ m = all.match(/(?:^|[^\d])(\d{2})[\/\.](\d{1,2})[\/\.](\d{1,2})(?:[^\d]|$)/); if(m) date = validYmd(2000+(+m[1]),m[2],m[3]); }
+  // 日付:候補をすべて集め、今日から1年以内のものを選ぶ(読み間違いで変な日付にしない)
+  const today = new Date(); const todayYmd = localToday();
+  const minD = new Date(today.getTime()-400*86400000); const minYmd = `${minD.getFullYear()}-${pad2(minD.getMonth()+1)}-${pad2(minD.getDate())}`;
+  const cands = [];
+  for(const m of all.matchAll(/(20\d{2})[年\/\.\-](\d{1,2})[月\/\.\-](\d{1,2})/g)) cands.push(validYmd(m[1],m[2],m[3]));
+  for(const m of all.matchAll(/(?:令和|R)(\d{1,2})[年\/\.\-](\d{1,2})[月\/\.\-](\d{1,2})/g)) cands.push(validYmd(2018+(+m[1]),m[2],m[3]));
+  for(const m of all.matchAll(/(?:^|[^\d])(\d{2})[\/\.](\d{1,2})[\/\.](\d{1,2})(?=[^\d]|$)/g)) cands.push(validYmd(2000+(+m[1]),m[2],m[3]));
+  const date = cands.find(d=> d && d>=minYmd && d<=todayYmd) || '';
   // 金額
   const amountsIn = l => (l.match(/[¥￥\\]?\d{1,3}(?:[,.]\d{3})+(?!\d)|[¥￥\\]\d+|\d+(?=円)|\d{2,7}/g)||[])
       .map(x=>parseInt(x.replace(/[¥￥\\,.]/g,''),10)).filter(n=>n>0 && n<10000000);
-  const NG = /小計|預り|預か|お預|釣|つり|ポイント|POINT|税率|対象|内消費税|消費税等|\(内|TEL|電話|No\.|NO\.|番号|会員|レジ|担当|点数|個数/;
-  let total = 0;
-  const KEYS = [/合計|合言十|総計|ご請求|お買上げ?|お買い?上げ?|お支払|支払金額|お会計/, /計/];
+  const NG = /小計|預り|預か|お預|釣|つり|ポイント|POINT|税率|対象|内消費税|消費税等|\(内|TEL|電話|No\.|NO\.|番号|会員|レジ|担当|点数|個数|単価/;
+  let total = 0, totalByKey = false;
+  const KEYS = [/合計|合言十|総計|ご?請求|お?買上げ?|お?買い?上げ?|お?支払|支払金額|お?会計/, /計/];
   outer: for(const key of KEYS){
     for(let i=0;i<flat.length;i++){
       const l = flat[i];
-      if(!key.test(l) || /小計/.test(l) && !/合計/.test(l)) continue;
-      if(/預|釣|ポイント/.test(l)) continue;
-      let nums = amountsIn(l.replace(/^.*?(合計|総計|請求|買上げ?|支払|会計|計)/,''));
+      if(!key.test(l) || (/小計/.test(l) && !/合計/.test(l))) continue;
+      if(/預|釣|ポイント|対象|内消費/.test(l)) continue;
+      let nums = amountsIn(l.replace(/^.*?(合計|総計|請求金額|請求|買上げ?金額|買上げ?|支払金額|支払|会計|計)/,''));
       if(!nums.length && flat[i+1]) nums = amountsIn(flat[i+1]);
-      if(nums.length){ total = nums[nums.length-1]; break outer; }
+      if(nums.length){ total = nums[nums.length-1]; totalByKey = true; break outer; }
     }
   }
   if(!total){
-    const cand = flat.filter(l=>!NG.test(l)).flatMap(l=>amountsIn(l).filter(n=>/[¥￥円,]/.test(l)));
+    const cand = flat.filter(l=>!NG.test(l)).flatMap(l=> /[¥￥\\円,]/.test(l) ? amountsIn(l) : []);
     if(cand.length) total = Math.max(...cand);
   }
-  // お店の名前(上の方で、住所・電話・日付などではない行)
-  let shop = '';
-  for(const l of lines.slice(0,6)){
-    const t = l.replace(/\s+/g,' ').trim();
-    if(t.length<2 || /領収|レシート|RECEIPT|TEL|電話|〒|http|www|\d{2,4}[-\/年]\d|ありがとう|いらっしゃい|登録番号|^T\d/.test(t.toUpperCase())) continue;
-    if(!/[A-Za-z぀-ヿ一-鿿]{2,}/.test(t)) continue;
-    // 読み取りで文字の間に入った余計な空白を取る(日本語どうしの間だけ)
-    shop = t.replace(/([^\x00-\x7F])\s+(?=[^\x00-\x7F])/g,'$1').slice(0,30); break;
+  // お店の名前の候補(上の方で、住所・電話・日付などではない、読める行)
+  const shopCands = [];
+  for(const l of lines.slice(0,7)){
+    let toks = l.replace(/\s+/g,' ').trim().split(' ');
+    // 行の前後についたゴミ(1文字だけの切れはし・小文字の英字)を外す
+    const junk = t => t.length<=1 || /^[a-z]{1,3}$/.test(t) || /^[^A-Za-z0-9\u3040-\u30ff\u4e00-\u9fff]+$/.test(t);
+    while(toks.length && junk(toks[0])) toks.shift();
+    while(toks.length && junk(toks[toks.length-1]) && !/[\u3040-\u30ff\u4e00-\u9fff]/.test(toks[toks.length-1])) toks.pop();
+    const t = toks.join(' ');
+    if(t.length<2 || /領収|レシート|RECEIPT|TEL|電話|〒|HTTP|WWW|\d{2,4}[-\/年]\d|ありがとう|いらっしゃい|登録番号|^T\d|注文/.test(t.toUpperCase()) || (/[市町村区]|丁目|番地/.test(t) && /\d/.test(t))) continue;
+    const clean = t.replace(/([^\x00-\x7F])\s+(?=[^\x00-\x7F])/g,'$1');
+    const jp = (clean.match(/[\u3040-\u30ff\u4e00-\u9fff]/g)||[]).length;
+    const up = (clean.match(/[A-Z]/g)||[]).length;
+    const good = (clean.match(/[A-Za-z\u3040-\u30ff\u4e00-\u9fff]/g)||[]).length;
+    if((jp < 2 && up < 3) || good/clean.replace(/\s/g,'').length < 0.6) continue; // 記号だらけの行は店名にしない
+    shopCands.push(clean.slice(0,30));
   }
-  return {date, total, shop};
+  const shop = shopCands[0] || '';
+  return {date, total, totalByKey, shop, shopCands};
 }
+// 店名は、読み取りの自信が高い行だけ使う(意味不明な店名を入れない)
+function shopFromData(data, cands){
+  if(!cands || !cands.length) return '';
+  if(!data || !Array.isArray(data.lines)) return cands[0];
+  for(const c of cands){
+    const key = c.replace(/\s/g,'').slice(0,4);
+    const line = data.lines.find(l=> z2h(l.text||'').replace(/\s/g,'').includes(key));
+    if(!line || typeof line.confidence!=='number' || line.confidence >= 65) return c;
+  }
+  return '';
+}
+async function readReceipt(file, onProgress){
+  const variants = await prepareReceiptVariants(file);
+  const worker = await getOcrWorker(onProgress);
+  let best = null;
+  for(let i=0;i<variants.length;i++){
+    if(onProgress) onProgress('recognizing', i/variants.length);
+    const { data } = await worker.recognize(variants[i]);
+    const r = parseReceiptText(data && data.text);
+    r.shop = shopFromData(data, r.shopCands);
+    const sc = receiptScore(r, data && data.confidence);
+    if(!best || sc > best.score) best = {...r, score:sc, text:(data&&data.text)||'', conf:(data&&data.confidence)||0};
+    if(r.total && r.totalByKey && r.date) break; // 十分に読めたら2回目は省略
+  }
+  return best;
+}
+
 function setScanStatus(html, kind){
   const el = document.getElementById('scanStatus');
   el.className = 'note' + (kind==='warn' ? ' msg warn' : '');
   el.innerHTML = html;
 }
+function scanCatOptions(sel){
+  return EXPENSE_CATEGORIES.filter(c=>c!=='減価償却費').map(c=>`<option value="${esc(c)}"${c===sel?' selected':''}>${esc(CATEGORY_LABEL[c]||c)}</option>`).join('');
+}
 document.getElementById('scanInput').addEventListener('change', async (e)=>{
   const file = e.target.files[0];
   e.target.value = '';
   if(!file) return;
+  // 前のレシートの内容が残らないよう、入力欄を空にしてから読み取る
+  if(editingExpenseId) exitExpenseEdit();
+  document.getElementById('expAmount').value = '';
+  document.getElementById('expMemo').value = '';
+  lastScanShop = '';
   // 写真はそのまま領収書として添付しておく(読み取りに失敗しても残る)
   try{ pendingReceipt = {name:file.name||'receipt.jpg', type:'image/jpeg', data: await resizeImageFile(file)}; renderReceiptPreview(); }catch(err){}
-  if(!document.getElementById('expDate').value) document.getElementById('expDate').value = localToday();
-  setScanStatus('📷 レシートを読み取っています…(初回は読み取りの準備に30秒ほどかかります)');
+  setScanStatus('📷 レシートを読み取っています…(初回は準備に30秒ほどかかります)');
+  let r = null;
   try{
-    const canvas = await prepareReceiptImage(file);
-    const worker = await getOcrWorker((st,p)=>{
-      const label = /recogniz/.test(st) ? '文字を読み取り中' : '準備中';
+    r = await readReceipt(file, (st,p)=>{
+      const label = /recogniz/.test(st) ? '文字を読み取り中' : '読み取りの準備中';
       setScanStatus(`📷 ${label}… ${Math.round(p*100)}%`);
     });
-    const { data } = await worker.recognize(canvas);
-    const r = parseReceiptText(data && data.text);
-    const filled = [];
-    if(r.date){ document.getElementById('expDate').value = r.date; filled.push('日付'); }
-    if(r.total){ document.getElementById('expAmount').value = r.total; filled.push('金額'); }
-    if(r.shop){
-      document.getElementById('expMemo').value = r.shop; filled.push('お店の名前');
-      lastScanShop = r.shop;
-      const cat = suggestCategory(r.shop);
-      if(cat && cat!==PERSONAL){ expCategorySelect.value = cat; filled.push('科目'); }
-    }
-    const missing = ['日付','金額'].filter(x=>!filled.includes(x));
-    setScanStatus(filled.length
-      ? `✓ ${esc(filled.join('・'))}を入れました。<b>レシートと見比べて、違うところは直してから「この内容を追加」</b>を押してください。${missing.length?`<br>⚠ ${esc(missing.join('・'))}は読み取れなかったので、手で入れてください。`:''}`
-      : '⚠ 文字を読み取れませんでした。明るい場所で、レシート全体がまっすぐ写るように撮り直すか、手で入力してください。写真は領収書として添付済みです。',
-      filled.length ? '' : 'warn');
-    document.getElementById('expAmount').scrollIntoView({behavior:'smooth', block:'center'});
   } catch(err){
-    setScanStatus('⚠ 読み取りの準備ができませんでした。インターネットにつながっているか確認して、もう一度お試しください。写真は領収書として添付済みなので、金額などは手で入力できます。', 'warn');
+    setScanStatus('⚠ 読み取りの準備ができませんでした。電波の良い場所でもう一度お試しください。写真は領収書として添付済みなので、下の欄に手で入力して「この内容を追加」でも記帳できます。', 'warn');
+    return;
   }
+  const cat = r.shop ? (suggestCategory(r.shop)||'') : '';
+  const okCount = (r.date?1:0) + (r.total?1:0);
+  const head = okCount===2 ? '✓ 読み取れました。<b>レシートと見比べて</b>、違うところを直してから記帳してください。'
+    : okCount===1 ? `⚠ ${r.date?'金額':'日付'}が読み取れませんでした。手で入れてから記帳してください。`
+    : '⚠ うまく読み取れませんでした。手で入れてから記帳するか、撮り直してください。';
+  setScanStatus(`
+    <div style="margin-bottom:10px;">${head}</div>
+    <div class="formRow">
+      <label>日付<input type="date" id="scanDate" value="${esc(r.date||localToday())}"></label>
+      <label>金額(円)<input type="number" inputmode="numeric" id="scanAmount" value="${r.total?esc(r.total):''}" placeholder="合計金額"></label>
+      <label style="grid-column:1/-1;">お店の名前<input type="text" id="scanShop" value="${esc(r.shop||'')}" placeholder="例:セリア"></label>
+      <label>科目<select id="scanCat">${scanCatOptions(cat && cat!==PERSONAL ? cat : '消耗品費')}</select></label>
+      <label>支払方法<select id="scanPay">
+        <option value="現金">現金</option>
+        <option value="普通預金">普通預金</option>
+        <option value="クレジットカード">クレジットカード</option>
+        <option value="事業主借">事業主借(個人のお金)</option>
+      </select></label>
+    </div>
+    <button type="button" class="btn" id="scanSaveBtn">この内容で記帳する</button>
+    <label class="btn secondary" for="scanInput" style="margin-top:8px;">撮り直す</label>
+    <details style="margin-top:10px;font-size:12px;"><summary>読み取った文字を見る</summary><pre style="white-space:pre-wrap;font-size:11.5px;margin:6px 0 0;">${esc((r.text||'').trim()||'(文字が見つかりませんでした)')}</pre></details>
+    <p class="hint" style="margin:8px 0 0;">うまく読めないときのコツ:レシートを画面いっぱいに、明るい所で、まっすぐ撮る(影やしわが少ないほど正確です)</p>
+  `, okCount===2 ? '' : 'warn');
+  const lastPay = (()=>{ try{ return localStorage.getItem('scanPay')||'現金'; }catch(err){ return '現金'; } })();
+  document.getElementById('scanPay').value = lastPay;
+  document.getElementById('scanSaveBtn').addEventListener('click', ()=>{
+    const d = document.getElementById('scanDate').value;
+    const a = toInt(document.getElementById('scanAmount').value);
+    const shop = document.getElementById('scanShop').value.trim();
+    const c = document.getElementById('scanCat').value;
+    const pm = document.getElementById('scanPay').value;
+    if(!d){ alertScan('日付を入れてください。'); return; }
+    if(a<=0){ alertScan('金額を入れてください。'); return; }
+    try{ localStorage.setItem('scanPay', pm); }catch(err){}
+    if(shop) learnShop(shop, c);
+    expenseEntries.push({id:expIdCounter++, date:d, category:c, amount:a, memo:shop, payMethod:pm, receipt:pendingReceipt, importKey:''});
+    pendingReceipt = null; renderReceiptPreview();
+    syncYearOptions(); renderExpenses();
+    setScanStatus(`✓ ${esc(d)} ${esc(shop||'')} ¥${a.toLocaleString()}(${esc(c)})を記帳しました。続けて撮る場合は、もう一度「レシートを撮影して読み取る」を押してください。`);
+  });
 });
+function alertScan(t){
+  let el = document.getElementById('scanAlert');
+  if(!el){ el = document.createElement('div'); el.id='scanAlert'; el.className='msg warn'; el.style.marginTop='8px'; document.getElementById('scanSaveBtn').after(el); }
+  el.textContent = t;
+}
 
 // ==================== クレジットカード明細(CSV)の取り込み ====================
 function decodeAny(buf){
