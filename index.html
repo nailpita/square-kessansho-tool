@@ -1756,8 +1756,8 @@ function parseReceiptText(raw){
   if(!date){ m = all.match(/(?:令和|R)(\d{1,2})[年\/\.\-](\d{1,2})[月\/\.\-](\d{1,2})/); if(m) date = validYmd(2018+(+m[1]),m[2],m[3]); }
   if(!date){ m = all.match(/(?:^|[^\d])(\d{2})[\/\.](\d{1,2})[\/\.](\d{1,2})(?:[^\d]|$)/); if(m) date = validYmd(2000+(+m[1]),m[2],m[3]); }
   // 金額
-  const amountsIn = l => (l.match(/[¥￥\\]?\d{1,3}(?:,\d{3})+|[¥￥\\]\d+|\d+(?=円)|\d{2,7}/g)||[])
-      .map(x=>parseInt(x.replace(/[¥￥\\,]/g,''),10)).filter(n=>n>0 && n<10000000);
+  const amountsIn = l => (l.match(/[¥￥\\]?\d{1,3}(?:[,.]\d{3})+(?!\d)|[¥￥\\]\d+|\d+(?=円)|\d{2,7}/g)||[])
+      .map(x=>parseInt(x.replace(/[¥￥\\,.]/g,''),10)).filter(n=>n>0 && n<10000000);
   const NG = /小計|預り|預か|お預|釣|つり|ポイント|POINT|税率|対象|内消費税|消費税等|\(内|TEL|電話|No\.|NO\.|番号|会員|レジ|担当|点数|個数/;
   let total = 0;
   const KEYS = [/合計|合言十|総計|ご請求|お買上げ?|お買い?上げ?|お支払|支払金額|お会計/, /計/];
@@ -1781,7 +1781,8 @@ function parseReceiptText(raw){
     const t = l.replace(/\s+/g,' ').trim();
     if(t.length<2 || /領収|レシート|RECEIPT|TEL|電話|〒|http|www|\d{2,4}[-\/年]\d|ありがとう|いらっしゃい|登録番号|^T\d/.test(t.toUpperCase())) continue;
     if(!/[A-Za-z぀-ヿ一-鿿]{2,}/.test(t)) continue;
-    shop = t.slice(0,30); break;
+    // 読み取りで文字の間に入った余計な空白を取る(日本語どうしの間だけ)
+    shop = t.replace(/([^\x00-\x7F])\s+(?=[^\x00-\x7F])/g,'$1').slice(0,30); break;
   }
   return {date, total, shop};
 }
