@@ -86,6 +86,18 @@
   .msg{border-radius:10px;padding:14px 16px;font-size:13.5px;margin-top:16px;}
   .msg.warn{background:var(--warn-soft);color:var(--warn);}
   .hidden{display:none;}
+  .scanBtn{display:flex;gap:12px;align-items:center;border:1.5px solid var(--accent);background:var(--accent-soft);color:var(--ink);border-radius:12px;padding:14px 16px;margin-bottom:14px;cursor:pointer;font-size:14px;line-height:1.5;}
+  .scanBtn .icon{font-size:26px;}
+  .scanBtn .sub-text{font-size:12px;color:var(--ink-soft);}
+  .scanBtn:focus-within,.scanBtn:hover{background:#efd5de;}
+  .ccRow{border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:grid;grid-template-columns:1fr auto;gap:4px 10px;align-items:center;}
+  .ccRow.need{border-color:var(--warn);background:var(--warn-soft);}
+  .ccRow .shop{font-size:13.5px;font-weight:600;min-width:0;overflow-wrap:anywhere;}
+  .ccRow .meta{font-size:12px;color:var(--ink-soft);}
+  .ccRow .amt{font-weight:700;font-variant-numeric:tabular-nums;text-align:right;}
+  .ccRow select{grid-column:1/-1;width:100%;}
+  .ccList{display:flex;flex-direction:column;gap:8px;max-height:420px;overflow-y:auto;margin-top:12px;}
+  .msg.ok{background:var(--ok-soft);color:var(--ok);}
   footer{text-align:center;font-size:11.5px;color:var(--ink-soft);margin-top:20px;}
 </style>
 </head>
@@ -156,7 +168,14 @@
 
   <div class="card">
     <h2>経費を記帳する(仕訳)</h2>
-    <p class="lead" style="font-size:13px;margin-bottom:14px;">決算書の経費科目に合わせて入力すると、科目ごとに自動で集計されます。前回の続きから入力する場合は先に「経費データを読み込む」でJSONファイルを選んでください。</p>
+    <p class="lead" style="font-size:13px;margin-bottom:14px;">決算書の経費科目に合わせて入力すると、科目ごとに自動で集計されます。入力した内容は自動で保存されます。</p>
+
+    <label class="scanBtn" for="scanInput">
+      <span class="icon">📷</span>
+      <span><b>レシートを撮影して読み取る</b><br><span class="sub-text">日付・合計金額・お店の名前を自動で入れます。読み取った後、内容を確認して「追加」を押してください</span></span>
+    </label>
+    <input type="file" id="scanInput" accept="image/*" capture="environment" style="display:none;">
+    <div id="scanStatus" class="note hidden" style="margin:0 0 14px;"></div>
 
     <div class="formRow">
       <label>日付<input type="date" id="expDate"></label>
@@ -239,6 +258,7 @@
 
     <div class="card">
       <h2>月別売上(収入)金額 — 決算書2ページ目の表に転記</h2>
+      <div id="missingMonths" class="hidden" style="margin:0 0 12px;"></div>
       <div class="table-scroll">
         <table>
           <thead><tr><th>月</th><th class="num">売上(収入)金額</th><th class="num">対象取引件数</th></tr></thead>
@@ -300,8 +320,15 @@
       <label>取得価額(円)<input type="number" id="assetCost" placeholder="0" min="0"></label>
       <label>耐用年数(年)<input type="number" id="assetLife" placeholder="例：15" min="1"></label>
       <label>事業使用割合(%)<input type="number" id="assetRatio" value="100" min="1" max="100"></label>
-      <label>計算対象の年<input type="number" id="assetYear" placeholder="例：2026"></label>
+      <label>購入時の支払方法<select id="assetPayMethod">
+        <option value="期首から保有">このツールを使う前の年に購入</option>
+        <option value="普通預金">普通預金(銀行振込・引落)</option>
+        <option value="現金">現金</option>
+        <option value="クレジットカード">クレジットカード(未払い)</option>
+        <option value="事業主借">事業主借(個人のお金で支払い)</option>
+      </select></label>
     </div>
+    <p class="hint" style="margin-bottom:10px;">償却費は、上の「対象の年度」で選んだ年の分が自動で計算されます。耐用年数が終わったら自動で止まり、最後は1円(備忘価額)を残します。</p>
     <button class="btn" id="addAssetBtn">この資産を追加</button>
     <button class="btn secondary hidden" id="cancelAssetEditBtn" style="margin-top:8px;">編集をキャンセル</button>
 
@@ -319,6 +346,27 @@
     <input type="file" id="assetFileInput" accept=".json" style="display:none;">
 
     <div class="stat" style="margin-top:14px;"><div class="label">減価償却費 合計(対象の年度分)</div><div class="value" id="depreciationTotal">¥0</div></div>
+  </div>
+
+  <div class="card" id="ccImportCard">
+    <h2>クレジットカードの明細を仕分ける(CSV取り込み)</h2>
+    <p class="lead" style="font-size:13px;margin-bottom:12px;">カード会社のサイト(楽天カードなら楽天e-NAVI)から「利用明細のCSV」をダウンロードして選んでください。1件ずつ「科目」か「個人用」を選ぶだけで、経費の記帳と引き落としの記録をまとめて行います。<b>一度選んだお店は、次回から自動で同じ科目</b>が入ります。</p>
+    <label class="drop" for="ccCsvInput" style="display:block;padding:18px 14px;">
+      <span class="main-text">💳 カード明細のCSVを選ぶ</span><br>
+      <span class="sub-text">楽天カードなど「利用日・利用店名・利用金額」がある明細</span>
+    </label>
+    <input type="file" id="ccCsvInput" accept=".csv,text/csv" style="display:none;">
+    <div id="ccReview" class="hidden">
+      <div class="note" id="ccSummary" style="margin-top:12px;"></div>
+      <div class="ccList" id="ccList"></div>
+      <div class="formRow" style="margin-top:14px;">
+        <label>引き落とし日(銀行から引かれる日)<input type="date" id="ccImportPayDate"></label>
+        <label style="justify-content:flex-end;"><span style="display:flex;gap:6px;align-items:center;color:var(--ink);"><input type="checkbox" id="ccImportSettle" checked style="width:auto;"> 引き落としも記録する</span></label>
+      </div>
+      <button class="btn" id="ccImportBtn">この仕分けで記帳する</button>
+      <button class="btn secondary" id="ccImportCancelBtn" style="margin-top:8px;">やめる</button>
+    </div>
+    <div class="msg hidden" id="ccImportMsg"></div>
   </div>
 
   <div class="card">
@@ -372,9 +420,10 @@
       <label>普通預金の期首残高(円)<input type="number" id="openingBank" placeholder="0" value="0"></label>
       <label>売掛金の期首残高(円)<input type="number" id="openingAR" placeholder="0" value="0"></label>
       <label>クレジット未払金の期首残高(円)<input type="number" id="openingCC" placeholder="0" value="0"></label>
-      <label>事業主貸(対象年度・追加分、円)<input type="number" id="ownerDraw" placeholder="0" value="0"></label>
+      <label>事業主貸:現金から生活費へ(対象年度、円)<input type="number" id="ownerDrawCash" placeholder="0" value="0"></label>
+      <label>事業主貸:普通預金から生活費へ(対象年度、円)<input type="number" id="ownerDrawBank" placeholder="0" value="0"></label>
     </div>
-    <p class="hint" style="margin-bottom:14px;">期首残高は、データが最初にある年の「年初時点」の実際の残高を入力してください(通帳の残高など)。2年目以降は自動で繰り越されるので入力不要です。「事業主貸(追加分)」は、クレジットカード引き落としの私的利用分以外に、現金などで生活費に使った分を入力してください。</p>
+    <p class="hint" style="margin-bottom:14px;">期首残高は、データが最初にある年の「年初時点」の実際の残高を入力してください(通帳の残高など)。2年目以降は自動で繰り越されるので入力不要です。「事業主貸」は、クレジットカード引き落としの私的利用分以外に、事業のお金を生活費に使った分を、出どころ(現金・普通預金)ごとに入力してください。年度ごとに別々に保存されます。</p>
     <button class="btn secondary" id="recalcBsBtn">貸借対照表を計算</button>
 
     <div class="table-scroll" style="margin-top:16px;">
@@ -402,6 +451,19 @@
     <div class="msg" id="bankCheckMsg" style="margin-top:12px;"></div>
   </div>
 
+  <div class="card">
+    <h2>データの保存・バックアップ</h2>
+    <p class="lead" style="font-size:13px;margin-bottom:12px;">入力した内容は、この端末(このブラウザ)の中に<b>自動で保存</b>されます。外部には送信されません。機種変更やブラウザのデータ削除に備えて、月に1回は「全データをバックアップ」で保存しておくと安心です。</p>
+    <div class="note" id="autosaveStatus" style="margin-top:0;">自動保存:準備中</div>
+    <div class="grid2" style="margin-top:12px;">
+      <button class="btn secondary" id="backupAllBtn">全データをバックアップ(JSON)</button>
+      <button class="btn secondary" id="restoreAllBtn">バックアップから復元</button>
+    </div>
+    <input type="file" id="restoreAllInput" accept=".json" style="display:none;">
+    <button class="btn secondary" id="clearAllBtn" style="margin-top:10px;">この端末のデータをすべて消去</button>
+    <div id="clearConfirm" class="msg warn hidden">本当に消去しますか?先にバックアップを保存してください。<div class="grid2" style="margin-top:10px;margin-bottom:0;"><button class="btn secondary" id="clearCancelBtn" style="margin-top:0;">やめる</button><button class="btn" id="clearOkBtn" style="margin-top:0;">消去する</button></div></div>
+  </div>
+
   <div id="errorArea"></div>
 
   <footer>
@@ -421,36 +483,46 @@ const resultArea = document.getElementById('resultArea');
 const errorArea = document.getElementById('errorArea');
 const yearSelect = document.getElementById('yearSelect');
 
+// ---- 安全のための文字エスケープ(入力やファイルの文字をプログラムとして動かさない) ----
+function esc(v){
+  return String(v===undefined||v===null?'':v).replace(/[&<>"'`]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;','`':'&#96;'}[c]));
+}
+function safeReceiptHref(r){
+  if(!r || typeof r.data!=='string') return '';
+  return /^data:(image\/(png|jpe?g|gif|webp|heic|heif)|application\/pdf);base64,/i.test(r.data) ? r.data : '';
+}
+function toInt(v){ const n = parseInt(v,10); return isNaN(n) ? 0 : n; }
+function localToday(){
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
 // ---- 減価償却 ----
-let assetEntries = []; // {id, name, acqMonth('YYYY-MM'), cost, life, ratio, targetYear}
+let assetEntries = []; // {id, name, acqMonth('YYYY-MM'), cost, life, ratio, payMethod}
 let assetIdCounter = 1;
 let editingAssetId = null;
 
 document.getElementById('addAssetBtn').addEventListener('click', ()=>{
   const name = document.getElementById('assetName').value.trim();
   const acqMonth = document.getElementById('assetDate').value; // YYYY-MM
-  const cost = parseInt(document.getElementById('assetCost').value||'0',10);
-  const life = parseInt(document.getElementById('assetLife').value||'0',10);
-  const ratio = parseInt(document.getElementById('assetRatio').value||'100',10);
-  const targetYear = parseInt(document.getElementById('assetYear').value||'0',10);
-  if(!name || !acqMonth || !cost || !life || !targetYear){
-    showError('資産名・取得年月・取得価額・耐用年数・計算対象の年をすべて入力してください。');
+  const cost = toInt(document.getElementById('assetCost').value||'0');
+  const life = toInt(document.getElementById('assetLife').value||'0');
+  let ratio = toInt(document.getElementById('assetRatio').value||'100');
+  const payMethod = document.getElementById('assetPayMethod').value;
+  if(!name || !acqMonth || cost<=0 || life<=0){
+    showError('資産名・取得年月・取得価額・耐用年数をすべて入力してください。');
     return;
   }
+  if(ratio<1 || ratio>100){ showError('事業使用割合は1〜100の間で入力してください。'); return; }
   clearError();
   if(editingAssetId){
     const a = assetEntries.find(a=>a.id===editingAssetId);
-    a.name=name; a.acqMonth=acqMonth; a.cost=cost; a.life=life; a.ratio=ratio; a.targetYear=targetYear;
+    a.name=name; a.acqMonth=acqMonth; a.cost=cost; a.life=life; a.ratio=ratio; a.payMethod=payMethod;
     exitAssetEdit();
   } else {
-    assetEntries.push({id:assetIdCounter++, name, acqMonth, cost, life, ratio, targetYear});
+    assetEntries.push({id:assetIdCounter++, name, acqMonth, cost, life, ratio, payMethod});
   }
-  document.getElementById('assetName').value='';
-  document.getElementById('assetDate').value='';
-  document.getElementById('assetCost').value='';
-  document.getElementById('assetLife').value='';
-  document.getElementById('assetRatio').value='100';
-  document.getElementById('assetYear').value='';
+  exitAssetEdit();
   syncYearOptions();
   renderAssets();
 });
@@ -464,29 +536,44 @@ function exitAssetEdit(){
   document.getElementById('assetCost').value='';
   document.getElementById('assetLife').value='';
   document.getElementById('assetRatio').value='100';
-  document.getElementById('assetYear').value='';
+  document.getElementById('assetPayMethod').value='期首から保有';
 }
 document.getElementById('cancelAssetEditBtn').addEventListener('click', exitAssetEdit);
 
-function calcDepreciation(a){
+// 1年ごとの償却額(事業割合を掛ける前の全額)。耐用年数が終わったら止まり、1円(備忘価額)を残す。
+function fullDepreciation(a, year){
+  if(!a || !a.acqMonth) return 0;
   const [ay, am] = a.acqMonth.split('-').map(Number);
-  const ty = a.targetYear;
-  if(ty < ay) return 0;
-  let months;
-  if(ty === ay) months = 13 - am; // acquisition year: from acquisition month to Dec
-  else months = 12; // later years: simplified full-year (does not track total remaining life)
-  const rate = 1/a.life;
-  const raw = a.cost * rate * (months/12) * (a.ratio/100);
-  return Math.round(raw);
+  const y = parseInt(year,10);
+  if(!ay || !am || y < ay) return 0;
+  const cost = toInt(a.cost), life = toInt(a.life);
+  if(cost<=1 || life<=0) return 0;
+  const limit = cost - 1;
+  const annual = cost / life;
+  let acc = 0, thisYear = 0;
+  for(let yy=ay; yy<=y; yy++){
+    const months = (yy===ay) ? (13-am) : 12;
+    let amt = Math.round(annual * months / 12);
+    if(acc + amt > limit) amt = Math.max(0, limit - acc);
+    acc += amt;
+    if(yy===y) thisYear = amt;
+  }
+  return thisYear;
+}
+// 経費になる償却費(事業使用割合を掛けた分)
+function calcDepreciation(a, year){
+  const full = fullDepreciation(a, year!==undefined ? year : yearSelect.value);
+  const ratio = Math.min(100, Math.max(0, toInt(a.ratio===undefined?100:a.ratio)));
+  return Math.round(full * ratio / 100);
 }
 
 function renderAssets(){
   document.getElementById('assetBody').innerHTML = assetEntries.map(a=>`
     <tr>
-      <td>${a.name}</td>
-      <td>${a.acqMonth}</td>
-      <td class="num">¥${a.cost.toLocaleString()}</td>
-      <td>${a.life}年</td>
+      <td>${esc(a.name)}</td>
+      <td>${esc(a.acqMonth)}</td>
+      <td class="num">¥${toInt(a.cost).toLocaleString()}</td>
+      <td>${esc(a.life)}年</td>
       <td class="num">¥${calcDepreciation(a).toLocaleString()}</td>
       <td><button class="delBtn" data-aedit="${a.id}">編集</button> <button class="delBtn" data-aid="${a.id}">削除</button></td>
     </tr>
@@ -510,7 +597,7 @@ function renderAssets(){
       document.getElementById('assetCost').value = a.cost;
       document.getElementById('assetLife').value = a.life;
       document.getElementById('assetRatio').value = a.ratio;
-      document.getElementById('assetYear').value = a.targetYear;
+      document.getElementById('assetPayMethod').value = a.payMethod || '期首から保有';
       document.getElementById('addAssetBtn').textContent = 'この内容で更新';
       document.getElementById('cancelAssetEditBtn').classList.remove('hidden');
       document.getElementById('assetName').scrollIntoView({behavior:'smooth', block:'center'});
@@ -520,6 +607,7 @@ function renderAssets(){
   const total = getDepreciationTotal(year);
   document.getElementById('depreciationTotal').textContent = '¥'+total.toLocaleString();
   renderExpenses();
+  scheduleSave();
 }
 
 document.getElementById('saveAssetBtn').addEventListener('click', ()=>{
@@ -539,10 +627,10 @@ document.getElementById('assetFileInput').addEventListener('change', async (e)=>
   try{
     const data = JSON.parse(await file.text());
     if(!Array.isArray(data)) throw new Error('invalid');
-    const maxId = data.reduce((m,d)=>Math.max(m,d.id||0),0);
+    const maxId = data.reduce((m,d)=>Math.max(m,toInt(d&&d.id)),0);
     assetIdCounter = Math.max(assetIdCounter, maxId+1);
     const existing = new Set(assetEntries.map(a=>a.id));
-    data.forEach(d=>{ if(!existing.has(d.id)) assetEntries.push(d); });
+    data.map(normAsset).filter(Boolean).forEach(d=>{ if(!existing.has(d.id)) assetEntries.push(d); });
     syncYearOptions();
     renderAssets();
   } catch(err){
@@ -597,9 +685,9 @@ function renderManualSales(){
   const sorted = [...manualSales].sort((a,b)=> a.date.localeCompare(b.date));
   document.getElementById('manualSalesBody').innerHTML = sorted.map(s=>`
     <tr>
-      <td>${s.date}</td>
-      <td class="num">¥${s.total.toLocaleString()}</td>
-      <td>${s.memo||''}${s.payMethod?` <span style="color:var(--ink-soft);font-size:11px;">(${s.payMethod})</span>`:''}</td>
+      <td>${esc(s.date)}</td>
+      <td class="num">¥${toInt(s.total).toLocaleString()}</td>
+      <td>${esc(s.memo||'')}${s.payMethod?` <span style="color:var(--ink-soft);font-size:11px;">(${esc(s.payMethod)})</span>`:''}</td>
       <td><button class="delBtn" data-sedit="${s.id}">編集</button> <button class="delBtn" data-sid="${s.id}">削除</button></td>
     </tr>
   `).join('');
@@ -647,10 +735,10 @@ document.getElementById('salesFileInput').addEventListener('change', async (e)=>
   try{
     const data = JSON.parse(await file.text());
     if(!Array.isArray(data)) throw new Error('invalid');
-    const maxId = data.reduce((m,d)=>Math.max(m,d.id||0),0);
+    const maxId = data.reduce((m,d)=>Math.max(m,toInt(d&&d.id)),0);
     salesIdCounter = Math.max(salesIdCounter, maxId+1);
     const existing = new Set(manualSales.map(s=>s.id));
-    data.forEach(d=>{ if(!existing.has(d.id)) manualSales.push(d); });
+    data.map(normSale).filter(Boolean).forEach(d=>{ if(!existing.has(d.id)) manualSales.push(d); });
     renderManualSales();
     syncYearOptions();
     renderResults();
@@ -664,10 +752,9 @@ function syncYearOptions(){
     ...allTransactions.map(t=>t.year),
     ...manualSales.map(s=>s.year),
     ...expenseEntries.map(e=>e.date.slice(0,4)),
-    ...assetEntries.map(a=>String(a.targetYear)),
     ...(typeof ccSettlements!=='undefined' ? ccSettlements.map(c=>c.date.slice(0,4)) : []),
     String(new Date().getFullYear())
-  ])).sort();
+  ])).filter(y=>/^\d{4}$/.test(y)).sort();
   const prev = yearSelect.value;
   yearSelect.innerHTML = years.map(y=>`<option value="${y}">${y}年</option>`).join('');
   yearSelect.value = years.includes(prev) ? prev : (years.includes(String(new Date().getFullYear())) ? String(new Date().getFullYear()) : years[years.length-1]);
@@ -677,7 +764,9 @@ function syncYearOptions(){
 }
 
 // ---- 経費(仕訳) ----
-const EXPENSE_CATEGORIES = ['租税公課','荷造運賃','水道光熱費','旅費交通費','通信費','広告宣伝費','接待交際費','損害保険料','修繕費','消耗品費','減価償却費','福利厚生費','給料賃金','外注工賃','利子割引料','地代家賃','貸倒金','雑費'];
+const EXPENSE_CATEGORIES = ['仕入高','租税公課','荷造運賃','水道光熱費','旅費交通費','通信費','広告宣伝費','接待交際費','損害保険料','修繕費','消耗品費','減価償却費','福利厚生費','給料賃金','外注工賃','利子割引料','地代家賃','貸倒金','研修費','支払手数料','雑費'];
+// 決算書の表示名(仕入高は「売上原価」の欄、研修費・支払手数料は経費の空欄に科目名を書いて記入)
+const CATEGORY_LABEL = {'仕入高':'仕入高(売上原価 ③欄)','研修費':'研修費(空欄に記入)','支払手数料':'支払手数料(空欄に記入)'};
 let expenseEntries = []; // {id, date, category, amount, memo, payMethod, receipt:{name,type,data}}
 let expIdCounter = 1;
 let editingExpenseId = null;
@@ -714,7 +803,7 @@ function renderReceiptPreview(){
   const box = document.getElementById('expReceiptPreview');
   if(!pendingReceipt){ box.classList.add('hidden'); box.innerHTML=''; return; }
   box.classList.remove('hidden');
-  box.innerHTML = `📎 ${pendingReceipt.name} を添付中 <button type="button" id="removeReceiptBtn" class="delBtn" style="margin-left:8px;">削除</button>`;
+  box.innerHTML = `📎 ${esc(pendingReceipt.name)} を添付中 <button type="button" id="removeReceiptBtn" class="delBtn" style="margin-left:8px;">削除</button>`;
   document.getElementById('removeReceiptBtn').addEventListener('click', ()=>{
     pendingReceipt = null;
     document.getElementById('expReceiptInput').value='';
@@ -733,6 +822,7 @@ document.getElementById('expReceiptInput').addEventListener('change', async (e)=
 
 const expCategorySelect = document.getElementById('expCategory');
 expCategorySelect.innerHTML = EXPENSE_CATEGORIES.map(c=>`<option value="${c}">${c}</option>`).join('');
+expCategorySelect.value = '消耗品費';
 
 document.getElementById('addExpenseBtn').addEventListener('click', ()=>{
   const date = document.getElementById('expDate').value;
@@ -743,6 +833,9 @@ document.getElementById('addExpenseBtn').addEventListener('click', ()=>{
   if(!date){ showError('日付を入力してください。'); return; }
   if(!amount || amount<=0){ showError('金額を入力してください。'); return; }
   clearError();
+  // レシートから読み取ったお店なら、選んだ科目を次回のために覚える
+  if(typeof lastScanShop!=='undefined' && lastScanShop && memo===lastScanShop){ learnShop(memo, category); }
+  lastScanShop = '';
   if(editingExpenseId){
     const ex = expenseEntries.find(e=>e.id===editingExpenseId);
     ex.date=date; ex.category=category; ex.amount=amount; ex.memo=memo; ex.payMethod=payMethod;
@@ -777,7 +870,7 @@ function exitExpenseEdit(){
 document.getElementById('cancelExpenseEditBtn').addEventListener('click', exitExpenseEdit);
 
 function getDepreciationTotal(year){
-  return assetEntries.filter(a=>String(a.targetYear)===String(year)).reduce((s,a)=> s+calcDepreciation(a), 0);
+  return assetEntries.reduce((s,a)=> s+calcDepreciation(a, year), 0);
 }
 
 function renderExpenses(){
@@ -786,10 +879,10 @@ function renderExpenses(){
   const sorted = [...yearExpenses].sort((a,b)=> a.date.localeCompare(b.date));
   document.getElementById('expenseBody').innerHTML = sorted.map(e=>`
     <tr>
-      <td>${e.date}</td>
-      <td>${e.category}</td>
-      <td class="num">¥${e.amount.toLocaleString()}</td>
-      <td>${e.memo||''}${e.payMethod?` <span style="color:var(--ink-soft);font-size:11px;">(${e.payMethod})</span>`:''}${e.receipt?` <a href="${e.receipt.data}" download="${e.receipt.name}" style="color:var(--accent-ink);">📎領収書</a>`:''}</td>
+      <td>${esc(e.date)}</td>
+      <td>${esc(e.category)}</td>
+      <td class="num">¥${toInt(e.amount).toLocaleString()}</td>
+      <td>${esc(e.memo||'')}${e.payMethod?` <span style="color:var(--ink-soft);font-size:11px;">(${esc(e.payMethod)})</span>`:''}${safeReceiptHref(e.receipt)?` <a href="${esc(safeReceiptHref(e.receipt))}" download="${esc(e.receipt.name||'receipt')}" style="color:var(--accent-ink);">📎領収書</a>`:''}</td>
       <td><button class="delBtn" data-eedit="${e.id}">編集</button> <button class="delBtn" data-id="${e.id}">削除</button></td>
     </tr>
   `).join('');
@@ -829,7 +922,7 @@ function renderExpenses(){
   const grandTotal = Object.values(totals).reduce((a,b)=>a+b,0);
 
   document.getElementById('categoryBody').innerHTML = EXPENSE_CATEGORIES.map(c=>`
-    <tr><td>${c}</td><td class="num">${totals[c]?('¥'+totals[c].toLocaleString()):'—'}</td></tr>
+    <tr><td>${esc(CATEGORY_LABEL[c]||c)}</td><td class="num">${totals[c]?('¥'+totals[c].toLocaleString()):'—'}</td></tr>
   `).join('') + `<tr class="total"><td>計</td><td class="num">¥${grandTotal.toLocaleString()}</td></tr>`;
 
   const feeNote = document.getElementById('autoFeeNote');
@@ -840,6 +933,7 @@ function renderExpenses(){
   }
 
   updatePnl(grandTotal, yearExpenses.length>0 || autoFee>0);
+  scheduleSave();
 }
 
 function updatePnl(expenseTotal, hasExpenses){
@@ -872,10 +966,10 @@ document.getElementById('expenseFileInput').addEventListener('change', async (e)
     const text = await file.text();
     const data = JSON.parse(text);
     if(!Array.isArray(data)) throw new Error('invalid');
-    const maxId = data.reduce((m,d)=>Math.max(m,d.id||0),0);
+    const maxId = data.reduce((m,d)=>Math.max(m,toInt(d&&d.id)),0);
     expIdCounter = Math.max(expIdCounter, maxId+1);
     const existingKeys = new Set(expenseEntries.map(e=>e.id));
-    data.forEach(d=>{
+    data.map(normExpense).filter(Boolean).forEach(d=>{
       if(!existingKeys.has(d.id)) expenseEntries.push(d);
     });
     syncYearOptions();
@@ -907,7 +1001,7 @@ document.getElementById('downloadExpenseCsvBtn').addEventListener('click', ()=>{
 });
 dropZone.addEventListener('drop', e=>{ handleFiles(e.dataTransfer.files); });
 fileInput.addEventListener('change', e=>{ handleFiles(e.target.files); });
-yearSelect.addEventListener('change', ()=>{ renderResults(); renderExpenses(); renderAssets(); renderBalanceSheet(); renderLossCarryforward(); });
+yearSelect.addEventListener('change', ()=>{ loadOwnerDrawInputs(); renderResults(); renderExpenses(); renderAssets(); renderBalanceSheet(); renderLossCarryforward(); });
 
 function showError(msg){
   errorArea.innerHTML = `<div class="card"><div class="msg warn">${msg}</div></div>`;
@@ -964,7 +1058,7 @@ async function handleFiles(files){
   clearError();
   const arr = Array.from(files);
   if(!arr.length) return;
-  fileList.innerHTML = arr.map(f=>`<div>✓ ${f.name}</div>`).join('');
+  fileList.innerHTML = arr.map(f=>`<div>✓ ${esc(f.name)}</div>`).join('');
 
   let newTx = [];
   let anyValid = false;
@@ -988,7 +1082,8 @@ async function handleFiles(files){
       if(!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
       const [y,m,d] = date.split('-');
       let total = yen(row[idx['受取合計額']]);
-      const fee = Math.abs(yen(row[idx['手数料']]));
+      // 手数料はCSVではマイナス表記(-¥322)。返金で戻った手数料はプラス表記になるため符号つきで扱う
+      const fee = -yen(row[idx['手数料']]);
       const refund = total < 0;
       total = Math.abs(total);
       const labels = [];
@@ -1005,8 +1100,9 @@ async function handleFiles(files){
       const payLabel = labels.length ? labels.join('+') : '-';
       const depositDate = idx['入金日']!==undefined ? (row[idx['入金日']]||'').trim() : '';
       const transferId = idx['振込ID']!==undefined ? (row[idx['振込ID']]||'').trim() : '';
-      const key = (idx['支払いID']!==undefined ? row[idx['支払いID']] : date+total+payLabel);
-      newTx.push({date, year:y, month:parseInt(m,10), day:d, total, fee, payLabel, refund, key, depositDate, transferId});
+      const key = (idx['支払いID']!==undefined && row[idx['支払いID']] ? row[idx['支払いID']] : date+'_'+(idx['時間']!==undefined?row[idx['時間']]:'')+'_'+total+'_'+payLabel);
+      const cash = idx['現金']!==undefined ? Math.abs(yen(row[idx['現金']])) : 0;
+      newTx.push({date, year:y, month:parseInt(m,10), day:d, total, fee, payLabel, refund, key, depositDate, transferId, cash});
     }
   }
 
@@ -1030,6 +1126,10 @@ async function handleFiles(files){
   renderResults();
 }
 
+// 現金で受け取った分(Square経由でも銀行入金はないので、売掛金にしない)
+function cashPart(t){ return Math.min(Math.max(0, toInt(t.cash)), toInt(t.total)); }
+function nonCashPart(t){ return toInt(t.total) - cashPart(t); }
+
 let currentMonthly = null;
 let currentDetail = null;
 
@@ -1044,7 +1144,7 @@ function renderResults(){
   const tx = [...squareTx, ...manualTx].sort((a,b)=> a.date.localeCompare(b.date) || 0);
 
   const monthly = Array.from({length:12}, (_,i)=>({month:i+1, sales:0, count:0}));
-  let totalSales=0, totalFee=0, count=0;
+  let totalSales=0, totalFee=0, count=0, refundTotal=0;
   let minDate=null, maxDate=null;
 
   tx.forEach(t=>{
@@ -1056,27 +1156,40 @@ function renderResults(){
       totalSales += t.total;
       count += 1;
     } else {
+      // 返金は売上から差し引く(月別・年間合計・損益すべて同じ扱い)
       monthly[t.month-1].sales -= t.total;
+      totalSales -= t.total;
+      refundTotal += t.total;
     }
     totalFee += t.fee;
   });
 
   document.getElementById('totalSales').textContent = '¥' + totalSales.toLocaleString();
-  document.getElementById('totalCount').textContent = `${count}件の取引(${year}年)`;
+  document.getElementById('totalCount').textContent = `${count}件の取引(${year}年)` + (refundTotal ? ` ・ 返金 ¥${refundTotal.toLocaleString()} を差し引き済み` : '');
   document.getElementById('totalFee').textContent = '¥' + totalFee.toLocaleString();
   document.getElementById('dataRange').textContent = minDate ? `${minDate}〜${maxDate}` : '-';
 
+  // 入れ忘れの月:データのある最初の月から、先月(過去の年なら12月)までで売上が0件の月
+  const nowD = new Date();
+  const firstM = monthly.findIndex(m=>m.count>0)+1;
+  const lastM = String(nowD.getFullYear())===year ? nowD.getMonth() : (parseInt(year,10) < nowD.getFullYear() ? 12 : 0);
+  const missing = firstM>0 ? monthly.filter(m=> m.count===0 && m.month>=firstM && m.month<=lastM).map(m=>m.month) : [];
+  const missEl = document.getElementById('missingMonths');
+  if(missEl){
+    missEl.className = missing.length ? 'msg warn' : 'hidden';
+    missEl.textContent = missing.length ? `⚠ ${missing.join('月・')}月の売上がありません。SquareのCSVの入れ忘れがないか確認してください(お休みの月なら問題ありません)。` : '';
+  }
   document.getElementById('monthlyBody').innerHTML = monthly.map(m=>`
-    <tr><td>${m.month}月</td><td class="num">${m.sales?('¥'+m.sales.toLocaleString()):'—'}</td><td class="num">${m.count||'—'}</td></tr>
+    <tr><td>${m.month}月</td><td class="num">${m.sales?('¥'+m.sales.toLocaleString()):(missing.includes(m.month)?'<span style="color:var(--warn)">未入力?</span>':'—')}</td><td class="num">${m.count||'—'}</td></tr>
   `).join('') + `<tr class="total"><td>計</td><td class="num">¥${totalSales.toLocaleString()}</td><td class="num">${count}</td></tr>`;
 
   document.getElementById('detailBody').innerHTML = tx.map(t=>`
     <tr>
-      <td>${t.date}</td>
-      <td class="num">${t.refund?('-¥'+t.total.toLocaleString()):('¥'+t.total.toLocaleString())}</td>
-      <td class="num">${t.fee?('¥'+t.fee.toLocaleString()):'—'}</td>
-      <td>${t.payLabel}<span style="color:var(--ink-soft);font-size:11px;"> ・ ${t.source}</span></td>
-      <td>${t.depositDate||'—'}</td>
+      <td>${esc(t.date)}</td>
+      <td class="num">${t.refund?('-¥'+toInt(t.total).toLocaleString()):('¥'+toInt(t.total).toLocaleString())}</td>
+      <td class="num">${t.fee?('¥'+toInt(t.fee).toLocaleString()):'—'}</td>
+      <td>${esc(t.payLabel)}<span style="color:var(--ink-soft);font-size:11px;"> ・ ${esc(t.source)}</span></td>
+      <td>${esc(t.depositDate||(t.source==='Square'&&cashPart(t)===toInt(t.total)?'現金で受取':'—'))}</td>
     </tr>
   `).join('');
 
@@ -1086,20 +1199,21 @@ function renderResults(){
   currentMonthly = {year, monthly, totalSales, totalFee, count};
   currentDetail = tx;
   renderExpenses();
+  scheduleSave();
 }
 
 let currentReconcile = null;
 
 function renderReconcile(){
   const year = yearSelect.value;
-  const squareTx = allTransactions.filter(t=>t.year===year && !t.refund);
+  const squareTx = allTransactions.filter(t=>t.year===year && nonCashPart(t)>0);
 
   const groups = {};
   squareTx.forEach(t=>{
     const gkey = t.transferId || ('未確定_'+(t.depositDate||t.date));
     if(!groups[gkey]) groups[gkey] = {depositDate: t.depositDate||'未確定', count:0, sales:0, fee:0};
-    groups[gkey].count++;
-    groups[gkey].sales += t.total;
+    if(!t.refund) groups[gkey].count++;
+    groups[gkey].sales += t.refund ? -nonCashPart(t) : nonCashPart(t);
     groups[gkey].fee += t.fee;
   });
 
@@ -1108,7 +1222,7 @@ function renderReconcile(){
 
   document.getElementById('reconcileBody').innerHTML = rows.map(g=>`
     <tr>
-      <td>${g.depositDate}</td>
+      <td>${esc(g.depositDate)}</td>
       <td class="num">${g.count}件</td>
       <td class="num">¥${g.sales.toLocaleString()}</td>
       <td class="num">¥${g.fee.toLocaleString()}</td>
@@ -1125,14 +1239,15 @@ document.getElementById('downloadReconcileBtn').addEventListener('click', ()=>{
 });
 
 function renderPending(){
-  const today = new Date().toISOString().slice(0,10);
-  const pending = allTransactions.filter(t=> !t.refund && (!t.depositDate || t.depositDate > today));
-  const total = pending.reduce((s,t)=> s+t.total, 0);
+  const today = localToday();
+  const year = yearSelect.value;
+  const pending = allTransactions.filter(t=> t.year===year && !t.refund && nonCashPart(t)>0 && (!t.depositDate || t.depositDate > today));
+  const total = pending.reduce((s,t)=> s+nonCashPart(t), 0);
   document.getElementById('pendingTotal').textContent = '¥'+total.toLocaleString();
   document.getElementById('pendingCount').textContent = pending.length+'件';
   document.getElementById('pendingBody').innerHTML = pending
     .sort((a,b)=> a.date.localeCompare(b.date))
-    .map(t=>`<tr><td>${t.date}</td><td class="num">¥${t.total.toLocaleString()}</td><td>${t.depositDate||'未確定'}</td></tr>`)
+    .map(t=>`<tr><td>${esc(t.date)}</td><td class="num">¥${nonCashPart(t).toLocaleString()}</td><td>${esc(t.depositDate||'未確定')}</td></tr>`)
     .join('') || '<tr><td colspan="3">入金待ちの取引はありません</td></tr>';
 }
 
@@ -1147,10 +1262,16 @@ document.getElementById('downloadMonthlyBtn').addEventListener('click', ()=>{
 document.getElementById('downloadDetailBtn').addEventListener('click', ()=>{
   if(!currentDetail) return;
   const lines = ['日付,売上,手数料,支払方法,入金予定日,区分'];
-  currentDetail.forEach(t=> lines.push(`${t.date},${t.refund?-t.total:t.total},${t.fee},"${t.payLabel}",${t.depositDate||''},${t.source}`));
+  currentDetail.forEach(t=> lines.push(`${csvCell(t.date)},${t.refund?-t.total:t.total},${t.fee},${csvCell(t.payLabel)},${csvCell(t.depositDate||'')},${csvCell(t.source)}`));
   downloadCSV(lines.join('\r\n'), `取引明細_${yearSelect.value}.csv`);
 });
 
+// CSVの1マス分を安全に作る(表計算ソフトで式として動かないようにする)
+function csvCell(v){
+  let t = String(v===undefined||v===null?'':v);
+  if(/^[=+\-@]/.test(t) && !/^-?\d+$/.test(t)) t = "'"+t;
+  return '"'+t.replace(/"/g,'""')+'"';
+}
 function downloadCSV(csv, filename){
   const blob = new Blob(['\uFEFF'+csv], {type:'text/csv;charset=utf-8;'});
   const url = URL.createObjectURL(blob);
@@ -1166,17 +1287,24 @@ function getAllYearsSorted(){
     ...allTransactions.map(t=>t.year),
     ...manualSales.map(s=>s.year),
     ...expenseEntries.map(e=>e.date.slice(0,4)),
-    ...assetEntries.map(a=>String(a.targetYear)),
     ...ccSettlements.map(c=>c.date.slice(0,4))
-  ])).sort();
+  ])).filter(y=>/^\d{4}$/.test(y)).sort();
+}
+// データがある最初の年より後に買った資産の年も、計算対象の年に含める
+function getBookYears(){
+  const base = getAllYearsSorted();
+  if(!base.length) return base;
+  const first = base[0];
+  const extra = assetEntries.map(a=>String(a.acqMonth||'').slice(0,4)).filter(y=>/^\d{4}$/.test(y) && y>=first);
+  return Array.from(new Set([...base, ...extra])).sort();
 }
 
 function getReconcileGroupsAll(){
   const groups = {};
-  allTransactions.filter(t=>!t.refund).forEach(t=>{
+  allTransactions.filter(t=>nonCashPart(t)>0).forEach(t=>{
     const gkey = t.transferId || ('未確定_'+(t.depositDate||t.date));
     if(!groups[gkey]) groups[gkey] = {depositDate: t.depositDate||'', sales:0, fee:0};
-    groups[gkey].sales += t.total;
+    groups[gkey].sales += t.refund ? -nonCashPart(t) : nonCashPart(t);
     groups[gkey].fee += t.fee;
   });
   return Object.values(groups);
@@ -1192,7 +1320,7 @@ function getAutoSquareFee(year){
 function computeYearPL(year, cutoffDate){
   const cutoff = cutoffDate || (year+'-12-31');
   const inY = (d)=> d.slice(0,4)===year && d<=cutoff;
-  const squareSales = allTransactions.filter(t=> t.year===year && !t.refund && t.date<=cutoff).reduce((s,t)=>s+t.total,0);
+  const squareSales = allTransactions.filter(t=> t.year===year && t.date<=cutoff).reduce((s,t)=>s+(t.refund?-t.total:t.total),0);
   const manualSalesTotal = manualSales.filter(s=> inY(s.date)).reduce((s,x)=>s+x.total,0);
   const sales = squareSales + manualSalesTotal;
   const yearExpenses = expenseEntries.filter(e=> inY(e.date)).reduce((s,e)=>s+e.amount,0);
@@ -1209,21 +1337,51 @@ function getAutoSquareFee(year){
 function computeBalanceSheet(uptoYear, cutoffDateArg){
   const cutoffDate = cutoffDateArg || (uptoYear+'-12-31');
   const cutoffYear = cutoffDate.slice(0,4);
-  const years = getAllYearsSorted().filter(y=> y<=cutoffYear);
-  let capital = parseInt(document.getElementById('openingCapital').value||'0',10);
-  let cash = parseInt(document.getElementById('openingCash').value||'0',10);
-  let bank = parseInt(document.getElementById('openingBank').value||'0',10);
-  let ar = parseInt(document.getElementById('openingAR').value||'0',10);
-  let cc = parseInt(document.getElementById('openingCC').value||'0',10);
-  const ownerDrawInput = parseInt(document.getElementById('ownerDraw').value||'0',10);
+  const allYears = getBookYears();
+  const firstYear = allYears[0];
+  const years = allYears.filter(y=> y<=cutoffYear);
+  let capital = toInt(document.getElementById('openingCapital').value||'0');
+  let cash = toInt(document.getElementById('openingCash').value||'0');
+  let bank = toInt(document.getElementById('openingBank').value||'0');
+  let ar = toInt(document.getElementById('openingAR').value||'0');
+  let cc = toInt(document.getElementById('openingCC').value||'0');
   const reconcileGroups = getReconcileGroupsAll();
+
+  // ツールを使う前の年に買った資産は、期首の帳簿価額を元入金に含める
+  assetEntries.forEach(a=>{
+    const ay = String(a.acqMonth||'').slice(0,4);
+    if(firstYear && ay && ay < firstYear){
+      let prior = 0;
+      for(let yy=parseInt(ay,10); yy<parseInt(firstYear,10); yy++) prior += fullDepreciation(a, yy);
+      capital += toInt(a.cost) - prior;
+    }
+  });
 
   years.forEach(y=>{
     const yCutoff = (y===cutoffYear) ? cutoffDate : (y+'-12-31');
     const inY = (d)=> d.slice(0,4)===y && d<=yCutoff;
 
-    const squareSalesY = allTransactions.filter(t=> t.year===y && !t.refund && t.date<=yCutoff).reduce((s,t)=>s+t.total,0);
-    ar += squareSalesY;
+    // Squareの売上:現金で受け取った分は「現金」、キャッシュレス分は「売掛金」
+    allTransactions.filter(t=> t.year===y && t.date<=yCutoff).forEach(t=>{
+      const sign = t.refund ? -1 : 1;
+      const c = cashPart(t);
+      cash += sign * c;
+      ar += sign * (t.total - c);
+    });
+
+    // 資産の購入(購入した年に、支払方法に応じて計上)
+    assetEntries.forEach(a=>{
+      const am = String(a.acqMonth||'');
+      if(am.slice(0,4)!==y || (am+'-01') > yCutoff) return;
+      const cost = toInt(a.cost);
+      const pm = a.payMethod || '期首から保有';
+      if(pm==='現金') cash -= cost;
+      else if(pm==='普通預金') bank -= cost;
+      else if(pm==='クレジットカード') cc += cost;
+      else capital += cost; // 事業主借・期首から保有
+    });
+    // 償却費のうち私的利用分(事業割合を超える分)は事業主貸
+    const personalDep = assetEntries.reduce((s,a)=> s + (fullDepreciation(a, y) - calcDepreciation(a, y)), 0);
 
     reconcileGroups.forEach(g=>{
       if(g.depositDate && inY(g.depositDate)){
@@ -1255,7 +1413,11 @@ function computeBalanceSheet(uptoYear, cutoffDateArg){
     });
 
     const ownerLoan = expenseEntries.filter(e=> inY(e.date) && (e.payMethod||'現金')==='事業主借').reduce((s,e)=>s+e.amount,0);
-    const ownerDraw = ccPersonalY + ((y===cutoffYear) ? ownerDrawInput : 0);
+    // 生活費に使った分(年度ごとに保存)。出どころの現金・普通預金も同じ額だけ減らす
+    const od = ownerDrawByYear[y] || {cash:0, bank:0};
+    const odCash = toInt(od.cash), odBank = toInt(od.bank);
+    cash -= odCash; bank -= odBank;
+    const ownerDraw = ccPersonalY + odCash + odBank + personalDep;
     const pl = computeYearPL(y, yCutoff);
     capital = capital + ownerLoan - ownerDraw + pl.netIncome;
   });
@@ -1263,11 +1425,11 @@ function computeBalanceSheet(uptoYear, cutoffDateArg){
   const cutoffNum = parseInt(cutoffYear,10);
   const assetAcc = {};
   assetEntries.forEach(a=>{
-    const ay = parseInt(a.acqMonth.split('-')[0],10);
-    if(ay<=cutoffNum){
+    const ay = parseInt(String(a.acqMonth||'').split('-')[0],10);
+    if(ay && ay<=cutoffNum){
       let accDep = 0;
-      for(let yy=ay; yy<=cutoffNum; yy++){ accDep += calcDepreciation({...a, targetYear:yy}); }
-      assetAcc[a.id] = {cost:a.cost, accDep};
+      for(let yy=ay; yy<=cutoffNum; yy++){ accDep += fullDepreciation(a, yy); }
+      assetAcc[a.id] = {cost:toInt(a.cost), accDep};
     }
   });
   const fixedCost = Object.values(assetAcc).reduce((s,f)=>s+f.cost,0);
@@ -1393,10 +1555,10 @@ function renderCc(){
   const sorted = [...ccSettlements].sort((a,b)=> a.date.localeCompare(b.date));
   document.getElementById('ccBody').innerHTML = sorted.map(c=>`
     <tr>
-      <td>${c.date}</td>
-      <td class="num">¥${c.total.toLocaleString()}</td>
-      <td class="num">${c.personal?('¥'+c.personal.toLocaleString()):'—'}</td>
-      <td>${c.memo||''}</td>
+      <td>${esc(c.date)}</td>
+      <td class="num">¥${toInt(c.total).toLocaleString()}</td>
+      <td class="num">${c.personal?('¥'+toInt(c.personal).toLocaleString()):'—'}</td>
+      <td>${esc(c.memo||'')}</td>
       <td><button class="delBtn" data-ccedit="${c.id}">編集</button> <button class="delBtn" data-ccid="${c.id}">削除</button></td>
     </tr>
   `).join('');
@@ -1424,6 +1586,7 @@ function renderCc(){
       document.getElementById('ccDate').scrollIntoView({behavior:'smooth', block:'center'});
     });
   });
+  scheduleSave();
 }
 
 document.getElementById('saveCcBtn').addEventListener('click', ()=>{
@@ -1441,10 +1604,10 @@ document.getElementById('ccFileInput').addEventListener('change', async (e)=>{
   try{
     const data = JSON.parse(await file.text());
     if(!Array.isArray(data)) throw new Error('invalid');
-    const maxId = data.reduce((m,d)=>Math.max(m,d.id||0),0);
+    const maxId = data.reduce((m,d)=>Math.max(m,toInt(d&&d.id)),0);
     ccIdCounter = Math.max(ccIdCounter, maxId+1);
     const existing = new Set(ccSettlements.map(c=>c.id));
-    data.forEach(d=>{ if(!existing.has(d.id)) ccSettlements.push(d); });
+    data.map(normCc).filter(Boolean).forEach(d=>{ if(!existing.has(d.id)) ccSettlements.push(d); });
     syncYearOptions();
     renderCc();
   } catch(err){
@@ -1489,10 +1652,492 @@ function renderLossCarryforward(){
   document.getElementById('lossRemaining').textContent = `翌年以降に繰り越せる損失：¥${remainingPool.toLocaleString()}`;
 }
 
+
+// ==================== お店ごとの仕分けルール(学習) ====================
+const PERSONAL = '個人用';
+let shopRules = {}; // {正規化した店名: 科目 or '個人用'}
+function normShop(name){
+  return String(name||'').normalize('NFKC').toUpperCase().replace(/[\s　・\-ｰ－*＊.,，、。()（）「」]/g,'').replace(/\d{3,}/g,'').slice(0,40);
+}
+// よくあるお店のキーワード(学習ルールが無いときの候補)
+const SHOP_HINTS = [
+  [/ネイル|NAIL|ジェル|TAT|ティーエー|ビューティーガレージ|BEAUTYGARAGE|プリジェル|パラジェル/, '仕入高'],
+  [/セリア|SERIA|ダイソー|DAISO|キャンドゥ|CANDO|ニトリ|NITORI|ホームセンター|コーナン|カインズ|ロフト|LOFT|ASKUL|アスクル|モノタロウ|MONOTARO/, '消耗品費'],
+  [/ENEOS|エネオス|出光|IDEMITSU|COSMO|コスモ石油|シェル|SHELL|ガソリン|駐車|パーキング|PARKING|JR|バス|交通|タクシー|TAXI|SUICA|SUGOCA|NIMOCA/, '旅費交通費'],
+  [/ドコモ|DOCOMO|KDDI|ソフトバンク|SOFTBANK|楽天モバイル|オプテージ|OPTAGE|MINEO|NTT|WIFI|郵便|切手|APPLE|アップル|GOOGLE|ICLOUD|CANVA|ADOBE/, '通信費'],
+  [/電力|でんき|電気|ガス|水道/, '水道光熱費'],
+  [/INSTAGRAM|META|FACEBOOK|ホットペッパー|HOTPEPPER|広告|チラシ|プリントパック|ラクスル|RAKSUL/, '広告宣伝費'],
+  [/セミナー|講座|スクール|SCHOOL|ACADEMY|アカデミー|協会|検定/, '研修費'],
+  [/ヤマト|佐川|ゆうパック|クロネコ|宅急便/, '荷造運賃'],
+  [/保険/, '損害保険料'],
+  [/NETFLIX|ネットフリックス|AMAZONPRIME|SPOTIFY|DISNEY|HULU|U-NEXT|UNEXT/, '雑費']
+];
+function suggestCategory(shop){
+  const key = normShop(shop);
+  if(!key) return '';
+  if(shopRules[key]) return shopRules[key];
+  // 前後の文字が違っても、学習済みの店名を含んでいればそれを使う
+  const hit = Object.keys(shopRules).filter(k=> k.length>=3 && (key.includes(k) || k.includes(key))).sort((a,b)=>b.length-a.length)[0];
+  if(hit) return shopRules[hit];
+  for(const [re, cat] of SHOP_HINTS){ if(re.test(key)) return cat; }
+  return '';
+}
+function learnShop(shop, choice){
+  const key = normShop(shop);
+  if(key && (choice===PERSONAL || EXPENSE_CATEGORIES.includes(choice))) shopRules[key] = choice;
+}
+
+// ==================== レシート写真の読み取り ====================
+// 文字の読み取りはこの端末の中で行い、画像を外部のサーバーには送りません(読み取りの部品だけ最初に1回ダウンロードします)。
+let ocrWorkerPromise = null;
+let lastScanShop = ''; // 読み取ったお店の名前(登録時に科目を覚えるため)
+function loadScript(src){
+  return new Promise((res, rej)=>{
+    const sc = document.createElement('script');
+    sc.src = src; sc.onload = res; sc.onerror = ()=>rej(new Error('load'));
+    document.head.appendChild(sc);
+  });
+}
+function getOcrWorker(onProgress){
+  if(!ocrWorkerPromise){
+    ocrWorkerPromise = (async ()=>{
+      if(!window.Tesseract) await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js');
+      return Tesseract.createWorker('jpn', 1, {
+        logger: m => { if(onProgress && m && typeof m.progress==='number') onProgress(m.status, m.progress); }
+      });
+    })().catch(err=>{ ocrWorkerPromise = null; throw err; });
+  }
+  return ocrWorkerPromise;
+}
+// 読み取りやすいように、白黒にして大きさをそろえる
+function prepareReceiptImage(file){
+  return new Promise((resolve, reject)=>{
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = ()=>{
+      const maxW = 1600, minW = 1000;
+      let scale = 1;
+      if(img.width > maxW) scale = maxW/img.width;
+      else if(img.width < minW) scale = Math.min(2, minW/img.width);
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width*scale); c.height = Math.round(img.height*scale);
+      const ctx = c.getContext('2d');
+      ctx.drawImage(img, 0, 0, c.width, c.height);
+      const d = ctx.getImageData(0,0,c.width,c.height); const px = d.data;
+      for(let i=0;i<px.length;i+=4){
+        const g = 0.299*px[i]+0.587*px[i+1]+0.114*px[i+2];
+        const v = g > 165 ? 255 : (g < 95 ? 0 : Math.round((g-95)*255/70));
+        px[i]=px[i+1]=px[i+2]=v;
+      }
+      ctx.putImageData(d,0,0);
+      URL.revokeObjectURL(url);
+      resolve(c);
+    };
+    img.onerror = ()=>{ URL.revokeObjectURL(url); reject(new Error('image')); };
+    img.src = url;
+  });
+}
+function z2h(t){ return String(t||'').normalize('NFKC'); }
+function pad2(n){ return String(n).padStart(2,'0'); }
+function validYmd(y,m,d){
+  y=+y; m=+m; d=+d;
+  if(!(y>=2000 && y<=2100 && m>=1 && m<=12 && d>=1 && d<=31)) return '';
+  return `${y}-${pad2(m)}-${pad2(d)}`;
+}
+// レシートの文字から、日付・合計金額・お店の名前を探す
+function parseReceiptText(raw){
+  const lines = z2h(raw).split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+  const flat = lines.map(l=>l.replace(/\s+/g,''));
+  const all = flat.join('\n');
+  // 日付
+  let date = '';
+  let m = all.match(/(20\d{2})[年\/\.\-](\d{1,2})[月\/\.\-](\d{1,2})/);
+  if(m) date = validYmd(m[1],m[2],m[3]);
+  if(!date){ m = all.match(/(?:令和|R)(\d{1,2})[年\/\.\-](\d{1,2})[月\/\.\-](\d{1,2})/); if(m) date = validYmd(2018+(+m[1]),m[2],m[3]); }
+  if(!date){ m = all.match(/(?:^|[^\d])(\d{2})[\/\.](\d{1,2})[\/\.](\d{1,2})(?:[^\d]|$)/); if(m) date = validYmd(2000+(+m[1]),m[2],m[3]); }
+  // 金額
+  const amountsIn = l => (l.match(/[¥￥\\]?\d{1,3}(?:,\d{3})+|[¥￥\\]\d+|\d+(?=円)|\d{2,7}/g)||[])
+      .map(x=>parseInt(x.replace(/[¥￥\\,]/g,''),10)).filter(n=>n>0 && n<10000000);
+  const NG = /小計|預り|預か|お預|釣|つり|ポイント|POINT|税率|対象|内消費税|消費税等|\(内|TEL|電話|No\.|NO\.|番号|会員|レジ|担当|点数|個数/;
+  let total = 0;
+  const KEYS = [/合計|合言十|総計|ご請求|お買上げ?|お買い?上げ?|お支払|支払金額|お会計/, /計/];
+  outer: for(const key of KEYS){
+    for(let i=0;i<flat.length;i++){
+      const l = flat[i];
+      if(!key.test(l) || /小計/.test(l) && !/合計/.test(l)) continue;
+      if(/預|釣|ポイント/.test(l)) continue;
+      let nums = amountsIn(l.replace(/^.*?(合計|総計|請求|買上げ?|支払|会計|計)/,''));
+      if(!nums.length && flat[i+1]) nums = amountsIn(flat[i+1]);
+      if(nums.length){ total = nums[nums.length-1]; break outer; }
+    }
+  }
+  if(!total){
+    const cand = flat.filter(l=>!NG.test(l)).flatMap(l=>amountsIn(l).filter(n=>/[¥￥円,]/.test(l)));
+    if(cand.length) total = Math.max(...cand);
+  }
+  // お店の名前(上の方で、住所・電話・日付などではない行)
+  let shop = '';
+  for(const l of lines.slice(0,6)){
+    const t = l.replace(/\s+/g,' ').trim();
+    if(t.length<2 || /領収|レシート|RECEIPT|TEL|電話|〒|http|www|\d{2,4}[-\/年]\d|ありがとう|いらっしゃい|登録番号|^T\d/.test(t.toUpperCase())) continue;
+    if(!/[A-Za-z぀-ヿ一-鿿]{2,}/.test(t)) continue;
+    shop = t.slice(0,30); break;
+  }
+  return {date, total, shop};
+}
+function setScanStatus(html, kind){
+  const el = document.getElementById('scanStatus');
+  el.className = 'note' + (kind==='warn' ? ' msg warn' : '');
+  el.innerHTML = html;
+}
+document.getElementById('scanInput').addEventListener('change', async (e)=>{
+  const file = e.target.files[0];
+  e.target.value = '';
+  if(!file) return;
+  // 写真はそのまま領収書として添付しておく(読み取りに失敗しても残る)
+  try{ pendingReceipt = {name:file.name||'receipt.jpg', type:'image/jpeg', data: await resizeImageFile(file)}; renderReceiptPreview(); }catch(err){}
+  if(!document.getElementById('expDate').value) document.getElementById('expDate').value = localToday();
+  setScanStatus('📷 レシートを読み取っています…(初回は読み取りの準備に30秒ほどかかります)');
+  try{
+    const canvas = await prepareReceiptImage(file);
+    const worker = await getOcrWorker((st,p)=>{
+      const label = /recogniz/.test(st) ? '文字を読み取り中' : '準備中';
+      setScanStatus(`📷 ${label}… ${Math.round(p*100)}%`);
+    });
+    const { data } = await worker.recognize(canvas);
+    const r = parseReceiptText(data && data.text);
+    const filled = [];
+    if(r.date){ document.getElementById('expDate').value = r.date; filled.push('日付'); }
+    if(r.total){ document.getElementById('expAmount').value = r.total; filled.push('金額'); }
+    if(r.shop){
+      document.getElementById('expMemo').value = r.shop; filled.push('お店の名前');
+      lastScanShop = r.shop;
+      const cat = suggestCategory(r.shop);
+      if(cat && cat!==PERSONAL){ expCategorySelect.value = cat; filled.push('科目'); }
+    }
+    const missing = ['日付','金額'].filter(x=>!filled.includes(x));
+    setScanStatus(filled.length
+      ? `✓ ${esc(filled.join('・'))}を入れました。<b>レシートと見比べて、違うところは直してから「この内容を追加」</b>を押してください。${missing.length?`<br>⚠ ${esc(missing.join('・'))}は読み取れなかったので、手で入れてください。`:''}`
+      : '⚠ 文字を読み取れませんでした。明るい場所で、レシート全体がまっすぐ写るように撮り直すか、手で入力してください。写真は領収書として添付済みです。',
+      filled.length ? '' : 'warn');
+    document.getElementById('expAmount').scrollIntoView({behavior:'smooth', block:'center'});
+  } catch(err){
+    setScanStatus('⚠ 読み取りの準備ができませんでした。インターネットにつながっているか確認して、もう一度お試しください。写真は領収書として添付済みなので、金額などは手で入力できます。', 'warn');
+  }
+});
+
+// ==================== クレジットカード明細(CSV)の取り込み ====================
+function decodeAny(buf){
+  const u = new Uint8Array(buf);
+  if(u[0]===0xFF && u[1]===0xFE) return new TextDecoder('utf-16le').decode(u);
+  if(u[0]===0xEF && u[1]===0xBB && u[2]===0xBF) return new TextDecoder('utf-8').decode(u.slice(3));
+  try{ return new TextDecoder('utf-8', {fatal:true}).decode(u); }
+  catch(e){ return new TextDecoder('shift_jis').decode(u); }
+}
+function parseDelimited(text, delim){
+  const rows = []; let row = [], field = '', q = false;
+  for(let i=0;i<text.length;i++){
+    const c = text[i];
+    if(q){ if(c==='"'){ if(text[i+1]==='"'){ field+='"'; i++; } else q=false; } else field+=c; }
+    else if(c==='"') q = true;
+    else if(c===delim){ row.push(field); field=''; }
+    else if(c==='\n'){ row.push(field); rows.push(row); row=[]; field=''; }
+    else if(c!=='\r') field+=c;
+  }
+  if(field!=='' || row.length){ row.push(field); rows.push(row); }
+  return rows;
+}
+function toYmd(s){
+  const t = z2h(s).trim();
+  let m = t.match(/(\d{4})[\/\-\.年](\d{1,2})[\/\-\.月](\d{1,2})/);
+  if(m) return validYmd(m[1],m[2],m[3]);
+  m = t.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if(m) return validYmd(m[1],m[2],m[3]);
+  return '';
+}
+let ccPending = []; // 取り込み前の明細
+let ccImportedKeys = []; // 取り込み済みの明細(個人用の分も含めて二重取り込みを防ぐ)
+function parseCardCsv(text){
+  const delim = (text.split('\n')[0]||'').includes('\t') ? '\t' : ',';
+  const rows = parseDelimited(text, delim);
+  const find = (hdr, names)=> hdr.findIndex(h=> names.some(n=> z2h(h).replace(/\s/g,'').includes(n)));
+  for(let h=0; h<Math.min(rows.length,15); h++){
+    const hdr = rows[h].map(x=>String(x||''));
+    const di = find(hdr, ['利用日','ご利用日','利用年月日','取引日','日付']);
+    const si = find(hdr, ['利用店名','ご利用店名','ご利用先','利用先','店名','摘要','内容']);
+    let ai = find(hdr, ['利用金額','ご利用金額']);
+    if(ai<0) ai = find(hdr, ['支払総額','金額']);
+    if(di<0 || si<0 || ai<0) continue;
+    const out = [];
+    for(let r=h+1; r<rows.length; r++){
+      const row = rows[r]; if(!row || row.length<=Math.max(di,si,ai)) continue;
+      const date = toYmd(row[di]); const shop = String(row[si]||'').trim();
+      const amount = yen(z2h(row[ai]).replace(/円/g,''));
+      if(!date || !shop || !amount) continue;
+      out.push({date, shop, amount});
+    }
+    return out;
+  }
+  return null;
+}
+function defaultPayDate(items){
+  // 一番新しい利用日の翌月27日(楽天カードの引き落とし日)を初期値にする
+  const last = items.map(i=>i.date).sort().pop();
+  if(!last) return '';
+  const y = +last.slice(0,4), m = +last.slice(5,7);
+  const ny = m===12 ? y+1 : y, nm = m===12 ? 1 : m+1;
+  return `${ny}-${pad2(nm)}-27`;
+}
+function ccOptionsHtml(sel){
+  const opts = ['', PERSONAL, ...EXPENSE_CATEGORIES.filter(c=>c!=='減価償却費')];
+  return opts.map(o=>`<option value="${esc(o)}"${o===sel?' selected':''}>${o===''?'— 選んでください —':(o===PERSONAL?'個人用(事業主貸・経費にしない)':esc(CATEGORY_LABEL[o]||o))}</option>`).join('');
+}
+function renderCcReview(){
+  const list = document.getElementById('ccList');
+  list.innerHTML = ccPending.map((it,i)=>`
+    <div class="ccRow${it.choice?'':' need'}${it.dup?' dup':''}">
+      <div class="shop">${esc(it.shop)}</div>
+      <div class="amt">${it.amount<0?'-':''}¥${Math.abs(it.amount).toLocaleString()}</div>
+      <div class="meta">${esc(it.date)}${it.dup?' ・ <b>記帳済み(取り込みません)</b>':(it.auto?' ・ 前回の仕分けを自動で入れました':'')}</div>
+      <div></div>
+      <select data-cci="${i}" aria-label="${esc(it.shop)}の仕分け"${it.dup?' disabled':''}>${ccOptionsHtml(it.choice)}</select>
+      ${(!it.dup && it.choice && it.choice!==PERSONAL && it.amount>0) ? `<label class="meta" style="grid-column:1/-1;display:flex;align-items:center;gap:8px;">うち事業用の金額(一部だけ事業用なら変更)<input type="number" inputmode="numeric" min="0" max="${it.amount}" value="${it.biz}" data-ccb="${i}" style="width:110px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;font-size:14px;"></label>` : ''}
+    </div>`).join('');
+  list.querySelectorAll('input[data-ccb]').forEach(inp=>{
+    inp.addEventListener('change', ()=>{
+      const it = ccPending[toInt(inp.dataset.ccb)];
+      it.biz = Math.min(it.amount, Math.max(0, toInt(inp.value)));
+      renderCcReview();
+    });
+  });
+  list.querySelectorAll('select[data-cci]').forEach(sel=>{
+    sel.addEventListener('change', ()=>{
+      const it = ccPending[toInt(sel.dataset.cci)];
+      it.choice = sel.value; it.auto = false;
+      // 同じお店の、まだ選んでいない行にも同じ選択を入れる
+      ccPending.forEach(o=>{ if(!o.choice && !o.dup && normShop(o.shop)===normShop(it.shop)) o.choice = sel.value; });
+      renderCcReview();
+    });
+  });
+  const active = ccPending.filter(i=>!i.dup);
+  const need = active.filter(i=>!i.choice).length;
+  const total = active.reduce((s,i)=>s+i.amount,0);
+  const personal = active.reduce((s,i)=> s + (i.choice===PERSONAL ? i.amount : (i.choice ? i.amount - i.biz : 0)), 0);
+  document.getElementById('ccSummary').innerHTML =
+    `${active.length}件 ・ 合計 ¥${total.toLocaleString()}(うち個人用 ¥${personal.toLocaleString()})` +
+    (need ? `<br><b style="color:var(--warn)">あと${need}件、仕分けを選んでください(オレンジの行)</b>` : '<br>✓ すべて選び終わりました') +
+    (ccPending.length-active.length ? `<br>記帳済みの${ccPending.length-active.length}件は取り込みません` : '');
+}
+document.getElementById('ccCsvInput').addEventListener('change', async (e)=>{
+  const file = e.target.files[0]; e.target.value=''; if(!file) return;
+  const msg = document.getElementById('ccImportMsg'); msg.className='msg hidden';
+  try{
+    const items = parseCardCsv(decodeAny(await file.arrayBuffer()));
+    if(!items || !items.length){
+      msg.className = 'msg warn';
+      msg.textContent = 'カード明細として読み取れませんでした。「利用日」「利用店名」「利用金額」の列があるCSVを選んでください。';
+      return;
+    }
+    const done = new Set([...expenseEntries.map(x=>x.importKey).filter(Boolean), ...ccImportedKeys]);
+    const seenKeys = {};
+    ccPending = items.map(it=>{
+      const base = `card:${it.date}:${normShop(it.shop)}:${it.amount}`;
+      seenKeys[base] = (seenKeys[base]||0)+1;
+      const key = base+':'+seenKeys[base];
+      const choice = suggestCategory(it.shop);
+      return {...it, key, choice, auto: !!choice, dup: done.has(key), biz: it.amount};
+    });
+    document.getElementById('ccImportPayDate').value = defaultPayDate(items);
+    document.getElementById('ccReview').classList.remove('hidden');
+    renderCcReview();
+    document.getElementById('ccReview').scrollIntoView({behavior:'smooth', block:'start'});
+  } catch(err){
+    msg.className = 'msg warn';
+    msg.textContent = 'ファイルを読み込めませんでした。カード会社のサイトからダウンロードしたCSVをそのまま選んでください。';
+  }
+});
+document.getElementById('ccImportCancelBtn').addEventListener('click', ()=>{
+  ccPending = []; document.getElementById('ccReview').classList.add('hidden');
+});
+document.getElementById('ccImportBtn').addEventListener('click', ()=>{
+  const msg = document.getElementById('ccImportMsg');
+  const active = ccPending.filter(i=>!i.dup);
+  const need = active.filter(i=>!i.choice).length;
+  if(need){ msg.className='msg warn'; msg.textContent = `まだ仕分けを選んでいない明細が${need}件あります。オレンジの行を選んでください。`; return; }
+  const settle = document.getElementById('ccImportSettle').checked;
+  const payDate = document.getElementById('ccImportPayDate').value;
+  if(settle && !payDate){ msg.className='msg warn'; msg.textContent='引き落とし日を入れてください(分からない場合は「引き落としも記録する」のチェックを外してください)。'; return; }
+  let added = 0, personal = 0, total = 0;
+  active.forEach(it=>{
+    learnShop(it.shop, it.choice);
+    total += it.amount;
+    ccImportedKeys.push(it.key);
+    if(it.choice===PERSONAL){ personal += it.amount; return; }
+    const biz = it.amount>0 ? Math.min(it.amount, Math.max(0, toInt(it.biz))) : it.amount;
+    personal += it.amount - biz;
+    if(biz===0) return;
+    expenseEntries.push({id:expIdCounter++, date:it.date, category:it.choice, amount:biz, memo:'カード：'+it.shop+(biz!==it.amount?`(${it.amount.toLocaleString()}円のうち事業用)`:''), payMethod:'クレジットカード', receipt:null, importKey:it.key});
+    added++;
+  });
+  // 個人用の分は、引き落としのときに「事業主貸」として処理する
+  let settleNote = '';
+  if(settle && total>0){
+    ccSettlements.push({id:ccIdCounter++, date:payDate, total, personal:Math.min(total, Math.max(0,personal)), memo:'カード明細から自動記録'});
+    settleNote = `、${payDate}の引き落とし ¥${total.toLocaleString()}(うち個人用 ¥${personal.toLocaleString()})`;
+  } else if(personal>0){
+    settleNote = `。個人用 ¥${personal.toLocaleString()} は、引き落としを記録するときに「私的利用分」に入れてください`;
+  }
+  ccPending = [];
+  document.getElementById('ccReview').classList.add('hidden');
+  msg.className = 'msg ok';
+  msg.textContent = `✓ 経費${added}件を記帳しました${settleNote}。お店ごとの仕分けは次回から自動で入ります。`;
+  syncYearOptions(); renderCc(); renderExpenses();
+});
+
+// ---- 入力データの形を整える(読み込んだファイルの安全確認) ----
+const isDate = v => typeof v==='string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
+function normSale(d){
+  if(!d || typeof d!=='object' || !isDate(d.date)) return null;
+  const pm = ['現金','普通預金','売掛金'].includes(d.payMethod) ? d.payMethod : '現金';
+  return {id:toInt(d.id), date:d.date, year:d.date.slice(0,4), month:toInt(d.date.slice(5,7)), total:Math.max(0,toInt(d.total)), memo:String(d.memo||''), payMethod:pm};
+}
+function normExpense(d){
+  if(!d || typeof d!=='object' || !isDate(d.date)) return null;
+  const cat = EXPENSE_CATEGORIES.includes(d.category) ? d.category : '雑費';
+  const pm = ['現金','普通預金','クレジットカード','事業主借'].includes(d.payMethod) ? d.payMethod : '現金';
+  const r = d.receipt && typeof d.receipt==='object' && safeReceiptHref(d.receipt) ? {name:String(d.receipt.name||'receipt'), type:String(d.receipt.type||''), data:d.receipt.data} : null;
+  return {id:toInt(d.id), date:d.date, category:cat, amount:toInt(d.amount), memo:String(d.memo||''), payMethod:pm, receipt:r, importKey:String(d.importKey||'')};
+}
+function normAsset(d){
+  if(!d || typeof d!=='object' || typeof d.acqMonth!=='string' || !/^\d{4}-\d{2}$/.test(d.acqMonth)) return null;
+  const pm = ['期首から保有','普通預金','現金','クレジットカード','事業主借'].includes(d.payMethod) ? d.payMethod : '期首から保有';
+  const ratio = Math.min(100, Math.max(1, toInt(d.ratio===undefined?100:d.ratio)));
+  return {id:toInt(d.id), name:String(d.name||''), acqMonth:d.acqMonth, cost:Math.max(0,toInt(d.cost)), life:Math.max(1,toInt(d.life)), ratio, payMethod:pm};
+}
+function normCc(d){
+  if(!d || typeof d!=='object' || !isDate(d.date)) return null;
+  const total = Math.max(0,toInt(d.total));
+  return {id:toInt(d.id), date:d.date, total, personal:Math.min(total, Math.max(0,toInt(d.personal))), memo:String(d.memo||'')};
+}
+function normTx(d){
+  if(!d || typeof d!=='object' || !isDate(d.date)) return null;
+  return {date:d.date, year:d.date.slice(0,4), month:toInt(d.date.slice(5,7)), day:d.date.slice(8,10), total:Math.max(0,toInt(d.total)), fee:toInt(d.fee),
+    payLabel:String(d.payLabel||'-'), refund:!!d.refund, key:String(d.key||''), depositDate:isDate(d.depositDate)?d.depositDate:'', transferId:String(d.transferId||''), cash:Math.max(0,toInt(d.cash))};
+}
+
+// ---- 事業主貸(年度ごと) ----
+let ownerDrawByYear = {}; // {'2026': {cash, bank}}
+function loadOwnerDrawInputs(){
+  const od = ownerDrawByYear[yearSelect.value] || {cash:0, bank:0};
+  document.getElementById('ownerDrawCash').value = toInt(od.cash);
+  document.getElementById('ownerDrawBank').value = toInt(od.bank);
+}
+['ownerDrawCash','ownerDrawBank'].forEach(id=>{
+  document.getElementById(id).addEventListener('input', ()=>{
+    const y = yearSelect.value; if(!y) return;
+    ownerDrawByYear[y] = {cash:toInt(document.getElementById('ownerDrawCash').value), bank:toInt(document.getElementById('ownerDrawBank').value)};
+    scheduleSave();
+  });
+});
+['openingCapital','openingCash','openingBank','openingAR','openingCC'].forEach(id=>{
+  document.getElementById(id).addEventListener('input', scheduleSave);
+});
+
+// ---- 自動保存(この端末のブラウザ内だけに保存。外部には送信しない) ----
+const STORE_KEY = 'square-kessansho-tool:v2';
+let saveTimer = null, restoring = false;
+function snapshot(){
+  const opening = {};
+  ['openingCapital','openingCash','openingBank','openingAR','openingCC'].forEach(id=> opening[id] = toInt(document.getElementById(id).value));
+  return {version:2, savedAt:new Date().toISOString(), transactions:allTransactions, manualSales, expenses:expenseEntries, assets:assetEntries, cc:ccSettlements, ownerDrawByYear, opening, shopRules, ccImportedKeys};
+}
+function setSaveStatus(text, warn){
+  const el = document.getElementById('autosaveStatus');
+  if(!el) return;
+  el.textContent = text;
+  el.style.color = warn ? 'var(--warn)' : '';
+}
+function scheduleSave(){
+  if(restoring) return;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveNow, 400);
+}
+function saveNow(){
+  try{
+    localStorage.setItem(STORE_KEY, JSON.stringify(snapshot()));
+    const d = new Date();
+    setSaveStatus(`自動保存:済み(${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')})`);
+  } catch(err){
+    setSaveStatus('⚠ 自動保存できませんでした。領収書の画像が多いと端末の保存容量を超えることがあります。「全データをバックアップ」で保存してください。', true);
+  }
+}
+function applySnapshot(data){
+  if(!data || typeof data!=='object') throw new Error('invalid');
+  restoring = true;
+  try{
+    allTransactions = (Array.isArray(data.transactions)?data.transactions:[]).map(normTx).filter(Boolean);
+    manualSales = (Array.isArray(data.manualSales)?data.manualSales:[]).map(normSale).filter(Boolean);
+    expenseEntries = (Array.isArray(data.expenses)?data.expenses:[]).map(normExpense).filter(Boolean);
+    assetEntries = (Array.isArray(data.assets)?data.assets:[]).map(normAsset).filter(Boolean);
+    ccSettlements = (Array.isArray(data.cc)?data.cc:[]).map(normCc).filter(Boolean);
+    ownerDrawByYear = {};
+    if(data.ownerDrawByYear && typeof data.ownerDrawByYear==='object'){
+      Object.keys(data.ownerDrawByYear).forEach(y=>{ if(/^\d{4}$/.test(y)){ const v=data.ownerDrawByYear[y]||{}; ownerDrawByYear[y]={cash:toInt(v.cash), bank:toInt(v.bank)}; } });
+    }
+    ccImportedKeys = Array.isArray(data.ccImportedKeys) ? data.ccImportedKeys.filter(k=>typeof k==='string' && k.length<200) : [];
+    shopRules = {};
+    if(data.shopRules && typeof data.shopRules==='object'){
+      Object.keys(data.shopRules).forEach(k=>{ const v=data.shopRules[k]; if(typeof k==='string' && k.length<=80 && (v===PERSONAL || EXPENSE_CATEGORIES.includes(v))) shopRules[k]=v; });
+    }
+    const op = data.opening || {};
+    ['openingCapital','openingCash','openingBank','openingAR','openingCC'].forEach(id=> document.getElementById(id).value = toInt(op[id]));
+    const mx = arr => arr.reduce((m,d)=>Math.max(m,toInt(d.id)),0)+1;
+    salesIdCounter = mx(manualSales); expIdCounter = mx(expenseEntries); assetIdCounter = mx(assetEntries); ccIdCounter = mx(ccSettlements);
+    if(allTransactions.length) fileList.innerHTML = `<div>✓ 保存済みのSquareデータ ${allTransactions.length}件を読み込みました</div>`;
+    syncYearOptions();
+    // 1〜3月は前年の申告準備の時期なので、前年にデータがあれば前年を選ぶ
+    const now = new Date(), prevY = String(now.getFullYear()-1);
+    if(now.getMonth()<3 && [...yearSelect.options].some(o=>o.value===prevY)) yearSelect.value = prevY;
+    loadOwnerDrawInputs();
+    renderManualSales(); renderCc(); renderAssets(); renderResults(); renderBalanceSheet(); renderLossCarryforward();
+  } finally { restoring = false; }
+}
+function loadSaved(){
+  let raw = null;
+  try{ raw = localStorage.getItem(STORE_KEY); } catch(err){ setSaveStatus('⚠ このブラウザでは自動保存が使えません(プライベートモードなど)。こまめに「全データをバックアップ」で保存してください。', true); return; }
+  if(!raw){ setSaveStatus('自動保存:オン(まだデータはありません)'); return; }
+  try{ applySnapshot(JSON.parse(raw)); setSaveStatus('自動保存:前回の続きのデータを読み込みました'); }
+  catch(err){ setSaveStatus('⚠ 保存データを読み込めませんでした。バックアップから復元してください。', true); }
+}
+document.getElementById('backupAllBtn').addEventListener('click', ()=>{
+  const blob = new Blob([JSON.stringify(snapshot(),null,2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `確定申告ツール_全データ_${localToday()}.json`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+});
+document.getElementById('restoreAllBtn').addEventListener('click', ()=> document.getElementById('restoreAllInput').click());
+document.getElementById('restoreAllInput').addEventListener('change', async (e)=>{
+  const file = e.target.files[0]; if(!file) return;
+  try{ applySnapshot(JSON.parse(await file.text())); saveNow(); clearError(); }
+  catch(err){ showError('バックアップの読み込みに失敗しました。「全データをバックアップ」で保存したファイルを選んでください。'); }
+  e.target.value='';
+});
+document.getElementById('clearAllBtn').addEventListener('click', ()=> document.getElementById('clearConfirm').classList.remove('hidden'));
+document.getElementById('clearCancelBtn').addEventListener('click', ()=> document.getElementById('clearConfirm').classList.add('hidden'));
+document.getElementById('clearOkBtn').addEventListener('click', ()=>{
+  try{ localStorage.removeItem(STORE_KEY); }catch(err){}
+  applySnapshot({});
+  fileList.innerHTML = '';
+  document.getElementById('clearConfirm').classList.add('hidden');
+  setSaveStatus('この端末のデータを消去しました');
+});
+
 syncYearOptions();
+loadOwnerDrawInputs();
 renderAssets();
-
-
+loadSaved();
 </script>
 </body>
 </html>
